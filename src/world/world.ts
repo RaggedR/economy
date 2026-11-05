@@ -1,0 +1,738 @@
+// world.ts — the worker's writeback. bwdS = applyEffect.
+//
+// The reducer accepts an effect and does not judge it again. assertInvariant
+// runs after every effect and throws on a leak. That throw is a bug, not a
+// refusal. A refusal never becomes an effect.
+//
+// Net financial assets, the quantity the flow column is checked against:
+//   a person, firm, or the government — deposits, minus bank-loan principal
+//     owed, plus private-loan principal held, minus private-loan principal
+//     issued;
+//   a bank — equity.
+// Interbank claims and deposit liabilities are inside the bank-sheet identity
+// (equity = loansOutstanding + depositLiability + signed interbank), so they
+// are not added on top of equity. Share units are a separate instrument, not
+// money, so they are not in NFA. Each effect records flow lines independently
+// of that diff; applyEffect throws if the lines do not equal the diff.
+
+import { params } from "./params.ts";
+import type {
+  BankId,
+  Deposits,
+  Effect,
+  FlowEntry,
+  Id,
+  Loan,
+  Material,
+  Money,
+  World,
+} from "./types.ts";
+import { isBankId, otherBank, signedInterbank } from "./types.ts";
+
+export class LeakError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LeakError";
+  }
+}
+
+export function purseOf(world: World, id: Id): Deposits | null {
+  if (world.people[id]) return world.people[id].deposits;
+  if (world.firms[id]) return world.firms[id].deposits;
+  if (world.government.id === id) return world.government.deposits;
+  return null;
+}
+
+function setPurse(world: World, id: Id, deposits: Deposits): World {
+  if (world.people[id]) {
+    return {
+      ...world,
+      people: { ...world.people, [id]: { ...world.people[id], deposits } },
+    };
+  }
+  if (world.firms[id]) {
+    return {
+      ...world,
+      firms: { ...world.firms, [id]: { ...world.firms[id], deposits } },
+    };
+  }
+  if (world.government.id === id) {
+    return { ...world, government: { ...world.government, deposits } };
+  }
+  throw new LeakError(`no purse for ${id}`);
+}
+
+function credit(world: World, id: Id, bank: BankId, delta: Money): World {
+  const p = purseOf(world, id);
+  if (!p) throw new LeakError(`no purse for ${id}`);
+  return setPurse(world, id, { ...p, [bank]: p[bank] + delta });
+}
+
+function takeId(world: World, prefix: string): { world: World; id: Id } {
+  const id = `${prefix}-${world.nextId}`;
+  return { world: { ...world, nextId: world.nextId + 1 }, id };
+}
+
+export function holderIds(world: World): Id[] {
+  return [
+    ...Object.keys(world.people),
+    ...Object.keys(world.firms),
+    world.government.id,
+    "a",
+    "b",
+  ];
+}
+
+export function nfa(world: World, id: Id): Money {
+  if (isBankId(id)) return world.banks[id].equity;
+  const purse = purseOf(world, id);
+  let n = purse ? purse.a + purse.b : 0;
+  for (const loan of Object.values(world.loans)) {
+    if (loan.kind === "bank" && loan.borrower === id) n -= loan.principal;
+    if (loan.kind === "private" && loan.holder === id) n += loan.principal;
+    if (loan.kind === "private" && loan.issuer === id) n -= loan.principal;
+  }
+  return n;
+}
+
+export function moneySupply(world: World): Money {
+  let s = 0;
+  for (const id of holderIds(world)) {
+    if (isBankId(id)) continue;
+    const p = purseOf(world, id);
+    if (p) s += p.a + p.b;
+  }
+  return s;
+}
+
+export function depositsAt(world: World, bank: BankId): Money {
+  let s = 0;
+  for (const id of holderIds(world)) {
+    if (isBankId(id)) continue;
+    const p = purseOf(world, id);
+    if (p) s += p[bank];
+  }
+  return s;
+}
+
+/** Reference ore price. Milestones 0–5 record no independent unit sale, so the
+ *  carried initial reference is the whole rule. `world` is in the signature
+ *  because a later market pass reads it. */
+export function refPrice(_world: World, material: Material): Money {
+  return params.initialRef[material];
+}
+
+export function markedMineBase(world: World, bank: BankId): Money {
+  let s = 0;
+  for (const mine of Object.values(world.mines)) {
+    if (mine.depositedAt === bank) s += mine.stock * refPrice(world, mine.material);
+  }
+  return s;
+}
+
+export function collateralValue(world: World, id: Id): Money | null {
+  const house = world.houses[id];
+  if (house) return house.units * params.houseUnitValue;
+  const mine = world.mines[id];
+  if (mine) return mine.stock * refPrice(world, mine.material);
+  return null;
+}
+
+export type Instrument =
+  | "deposits"
+  | "loans"
+  | "privateLoans"
+  | "shares"
+  | "interbank";
+
+export function instrumentSums(world: World): Record<Instrument, Money> {
+  const depositAssets = depositsAt(world, "a") + depositsAt(world, "b");
+  const depositLiabilities = world.banks.a.depositLiability +
+    world.banks.b.depositLiability;
+
+  let loanLiabilities = 0;
+  let privateNet = 0;
+  for (const loan of Object.values(world.loans)) {
+    if (loan.kind === "bank") loanLiabilities -= loan.principal;
+    else {
+      privateNet += loan.principal;
+      privateNet -= loan.principal;
+    }
+  }
+  const loansOutstanding = world.banks.a.loansOutstanding +
+    world.banks.b.loansOutstanding;
+
+  let shareUnits = 0;
+  for (const share of Object.values(world.shares)) shareUnits += share.units;
+  const sharesOutstanding = world.banks.a.sharesOutstanding +
+    world.banks.b.sharesOutstanding;
+
+  return {
+    deposits: depositAssets + depositLiabilities,
+    loans: loansOutstanding + loanLiabilities,
+    privateLoans: privateNet,
+    shares: shareUnits - sharesOutstanding,
+    interbank: world.interbank + -world.interbank,
+  };
+}
+
+function assertInteger(name: string, n: number): void {
+  if (!Number.isInteger(n)) throw new LeakError(`${name} is not an integer`);
+}
+
+/** Stock laws. Throws LeakError naming the instrument when a row does not close. */
+export function assertInvariant(world: World): void {
+  for (const bank of ["a", "b"] as const) {
+    const b = world.banks[bank];
+    assertInteger(`${bank}.equity`, b.equity);
+    assertInteger(`${bank}.depositLiability`, b.depositLiability);
+    assertInteger(`${bank}.loansOutstanding`, b.loansOutstanding);
+    assertInteger(`${bank}.sharesOutstanding`, b.sharesOutstanding);
+    const at = depositsAt(world, bank);
+    if (b.depositLiability !== -at) {
+      throw new LeakError(
+        `deposits: ${bank} liability ${b.depositLiability} ≠ -${at}`,
+      );
+    }
+    let principals = 0;
+    for (const loan of Object.values(world.loans)) {
+      if (loan.kind === "bank" && loan.bank === bank) principals += loan.principal;
+    }
+    if (b.loansOutstanding !== principals) {
+      throw new LeakError(
+        `loans: ${bank} outstanding ${b.loansOutstanding} ≠ principals ${principals}`,
+      );
+    }
+    let units = 0;
+    for (const share of Object.values(world.shares)) {
+      if (share.bank === bank) units += share.units;
+    }
+    if (b.sharesOutstanding !== units) {
+      throw new LeakError(
+        `shares: ${bank} outstanding ${b.sharesOutstanding} ≠ units ${units}`,
+      );
+    }
+    const sheet = b.loansOutstanding + b.depositLiability +
+      signedInterbank(bank, world.interbank);
+    if (b.equity !== sheet) {
+      throw new LeakError(
+        `equity: ${bank} equity ${b.equity} ≠ loans + deposits + interbank ${sheet}`,
+      );
+    }
+  }
+
+  const sums = instrumentSums(world);
+  for (const name of Object.keys(sums) as Instrument[]) {
+    if (sums[name] !== 0) {
+      throw new LeakError(`${name} sums to ${sums[name]}, not 0`);
+    }
+  }
+
+  let totalNfa = 0;
+  for (const id of holderIds(world)) totalNfa += nfa(world, id);
+  if (totalNfa !== 0) throw new LeakError(`nfa sums to ${totalNfa}, not 0`);
+
+  for (const house of Object.values(world.houses)) {
+    if (house.units <= 0 || house.units % 10 !== 0) {
+      throw new LeakError(
+        `house ${house.id} units ${house.units} are not a positive multiple of 10`,
+      );
+    }
+  }
+  for (const mine of Object.values(world.mines)) {
+    if (mine.stock < 0) throw new LeakError(`mine ${mine.id} stock is negative`);
+    if (mine.depositedAt !== null && !isBankId(mine.owner)) {
+      throw new LeakError(`mine ${mine.id} is deposited but owned by ${mine.owner}`);
+    }
+  }
+  for (const line of world.flows) assertInteger(`flow ${line.row}`, line.amount);
+}
+
+function linesOf(built: FlowEntry[], month: number): FlowEntry[] {
+  return built.map((l) => ({ ...l, month }));
+}
+
+function withFlows(before: World, after: World, lines: FlowEntry[]): World {
+  const next: World = { ...after, flows: [...before.flows, ...lines] };
+  const ids = new Set<Id>([...holderIds(before), ...holderIds(after)]);
+  for (const line of lines) ids.add(line.holder);
+  for (const id of ids) {
+    const d = nfa(next, id) - nfa(before, id);
+    const f = lines.filter((l) => l.holder === id).reduce((s, l) => s + l.amount, 0);
+    if (d !== f) {
+      throw new LeakError(`flow column ${id}: recorded ${f} ≠ ΔNFA ${d}`);
+    }
+  }
+  const rows = new Map<string, number>();
+  for (const line of next.flows) {
+    rows.set(line.row, (rows.get(line.row) ?? 0) + line.amount);
+  }
+  for (const [row, sum] of rows) {
+    if (sum !== 0) throw new LeakError(`flow row ${row} sums to ${sum}, not 0`);
+  }
+  assertInvariant(next);
+  return next;
+}
+
+function pair(
+  month: number,
+  row: FlowEntry["row"],
+  from: Id,
+  to: Id,
+  amount: Money,
+): FlowEntry[] {
+  if (amount === 0) return [];
+  return [
+    { month, row, holder: from, amount: -amount },
+    { month, row, holder: to, amount },
+  ];
+}
+
+/** Debit `from`'s largest balance first. Credit `to` at each bank that was
+ *  debited, so that bank's deposit liability is unchanged. */
+function payAcrossHolders(world: World, from: Id, to: Id, amount: Money): World {
+  const purse = purseOf(world, from);
+  if (!purse) throw new LeakError(`no purse for ${from}`);
+  const order: BankId[] = purse.a > purse.b
+    ? ["a", "b"]
+    : purse.b > purse.a
+    ? ["b", "a"]
+    : ["a", "b"];
+  let left = amount;
+  let next = world;
+  for (const bank of order) {
+    const have = purseOf(next, from)![bank];
+    const take = Math.min(have, left);
+    if (take <= 0) continue;
+    next = credit(next, from, bank, -take);
+    next = credit(next, to, bank, take);
+    left -= take;
+  }
+  if (left !== 0) {
+    throw new LeakError(`pay of ${amount} from ${from} could not be funded`);
+  }
+  return next;
+}
+
+/** Pay `amount` to a bank. Funds at that bank are destroyed into equity, so the
+ *  money supply, and with it the sum of deposit liabilities, moves by the same
+ *  amount. A shortfall is funded at the other bank and booked as that bank's
+ *  claim. A person-to-person pay never comes through here, and never moves
+ *  interbank. */
+function payToBank(world: World, from: Id, bank: BankId, amount: Money): World {
+  const purse = purseOf(world, from);
+  if (!purse) throw new LeakError(`no purse for ${from}`);
+  const here = Math.min(purse[bank], amount);
+  const rest = amount - here;
+  let next = world;
+  if (here > 0) {
+    next = credit(next, from, bank, -here);
+    const b = next.banks[bank];
+    next = {
+      ...next,
+      banks: {
+        ...next.banks,
+        [bank]: {
+          ...b,
+          depositLiability: b.depositLiability + here,
+          equity: b.equity + here,
+        },
+      },
+    };
+  }
+  if (rest > 0) {
+    const other = otherBank(bank);
+    const there = purseOf(next, from)![other];
+    if (there < rest) {
+      throw new LeakError(`pay of ${amount} to ${bank} could not be funded`);
+    }
+    next = credit(next, from, other, -rest);
+    const payerBank = next.banks[other];
+    const payee = next.banks[bank];
+    // The other bank owes the payee. Claim of a on b moves accordingly.
+    const interbank = next.interbank + (bank === "a" ? rest : -rest);
+    next = {
+      ...next,
+      interbank,
+      banks: {
+        ...next.banks,
+        [other]: { ...payerBank, depositLiability: payerBank.depositLiability + rest },
+        [bank]: { ...payee, equity: payee.equity + rest },
+      },
+    };
+  }
+  return next;
+}
+
+/** Take `amount` from the borrower's deposit at `bank` first, then the other
+ *  bank, booking interbank the same way as a payment to `bank`. Equity is not
+ *  touched: this funds a principal repayment, which destroys deposits. */
+function fundRepayment(world: World, from: Id, bank: BankId, amount: Money): World {
+  const purse = purseOf(world, from);
+  if (!purse) throw new LeakError(`no purse for ${from}`);
+  const here = Math.min(purse[bank], amount);
+  const rest = amount - here;
+  let next = world;
+  if (here > 0) {
+    next = credit(next, from, bank, -here);
+    const b = next.banks[bank];
+    next = {
+      ...next,
+      banks: {
+        ...next.banks,
+        [bank]: { ...b, depositLiability: b.depositLiability + here },
+      },
+    };
+  }
+  if (rest > 0) {
+    const other = otherBank(bank);
+    if (purseOf(next, from)![other] < rest) {
+      throw new LeakError(`repay of ${amount} to ${bank} could not be funded`);
+    }
+    next = credit(next, from, other, -rest);
+    const payerBank = next.banks[other];
+    const interbank = next.interbank + (bank === "a" ? rest : -rest);
+    next = {
+      ...next,
+      interbank,
+      banks: {
+        ...next.banks,
+        [other]: { ...payerBank, depositLiability: payerBank.depositLiability + rest },
+      },
+    };
+  }
+  return next;
+}
+
+function setLien(world: World, collateral: Id, loanId: Id | null): World {
+  if (world.houses[collateral]) {
+    return {
+      ...world,
+      houses: {
+        ...world.houses,
+        [collateral]: { ...world.houses[collateral], lien: loanId },
+      },
+    };
+  }
+  if (world.mines[collateral]) {
+    return {
+      ...world,
+      mines: {
+        ...world.mines,
+        [collateral]: { ...world.mines[collateral], lien: loanId },
+      },
+    };
+  }
+  return world;
+}
+
+function clearLien(world: World, loanId: Id): World {
+  let next = world;
+  for (const house of Object.values(world.houses)) {
+    if (house.lien === loanId) next = setLien(next, house.id, null);
+  }
+  for (const mine of Object.values(world.mines)) {
+    if (mine.lien === loanId) next = setLien(next, mine.id, null);
+  }
+  return next;
+}
+
+function dropLoan(world: World, id: Id): World {
+  const loans = { ...world.loans };
+  delete loans[id];
+  return clearLien({ ...world, loans }, id);
+}
+
+function writeOffNumbers(world: World, loan: Loan): { world: World; lines: FlowEntry[] } {
+  const month = world.month;
+  if (loan.kind === "private") {
+    const next = dropLoan(world, loan.id);
+    return {
+      world: next,
+      lines: pair(month, "writeOff", loan.holder, loan.issuer, loan.principal),
+    };
+  }
+  const bank = world.banks[loan.bank];
+  const stripped = dropLoan(world, loan.id);
+  const next: World = {
+    ...stripped,
+    banks: {
+      ...stripped.banks,
+      [loan.bank]: {
+        ...stripped.banks[loan.bank],
+        loansOutstanding: bank.loansOutstanding - loan.principal,
+        equity: bank.equity - loan.principal,
+        losses: bank.losses + loan.principal,
+      },
+    },
+  };
+  return {
+    world: next,
+    lines: pair(month, "writeOff", loan.bank, loan.borrower, loan.principal),
+  };
+}
+
+function applyBare(world: World, effect: Effect): { world: World; lines: FlowEntry[] } {
+  const month = world.month;
+  switch (effect.tag) {
+    case "pay": {
+      if (isBankId(effect.from)) {
+        throw new LeakError("a bank does not pay through pay; use dividend");
+      }
+      const next = isBankId(effect.to)
+        ? payToBank(world, effect.from, effect.to, effect.amount)
+        : payAcrossHolders(world, effect.from, effect.to, effect.amount);
+      return {
+        world: next,
+        lines: pair(month, effect.row, effect.from, effect.to, effect.amount),
+      };
+    }
+    case "lendBank": {
+      const taken = takeId(world, "loan");
+      const loan: Loan = {
+        kind: "bank",
+        id: taken.id,
+        bank: effect.bank,
+        borrower: effect.borrower,
+        principal: effect.amount,
+        installment: effect.installment,
+        months: effect.months,
+        collateral: effect.collateral,
+      };
+      let next = credit(taken.world, effect.borrower, effect.bank, effect.amount);
+      const bank = next.banks[effect.bank];
+      next = {
+        ...next,
+        loans: { ...next.loans, [loan.id]: loan },
+        banks: {
+          ...next.banks,
+          [effect.bank]: {
+            ...bank,
+            depositLiability: bank.depositLiability - effect.amount,
+            loansOutstanding: bank.loansOutstanding + effect.amount,
+          },
+        },
+      };
+      next = setLien(next, effect.collateral, loan.id);
+      return { world: next, lines: [] };
+    }
+    case "repayBank": {
+      const loan = world.loans[effect.loan];
+      if (!loan || loan.kind !== "bank") {
+        throw new LeakError(`no bank loan ${effect.loan}`);
+      }
+      let next = fundRepayment(world, loan.borrower, loan.bank, effect.amount);
+      const bank = next.banks[loan.bank];
+      const remaining = loan.principal - effect.amount;
+      if (remaining === 0) {
+        next = dropLoan(next, loan.id);
+      } else {
+        next = {
+          ...next,
+          loans: { ...next.loans, [loan.id]: { ...loan, principal: remaining } },
+        };
+      }
+      next = {
+        ...next,
+        banks: {
+          ...next.banks,
+          [loan.bank]: {
+            ...bank,
+            loansOutstanding: bank.loansOutstanding - effect.amount,
+          },
+        },
+      };
+      return { world: next, lines: [] };
+    }
+    case "issuePrivate": {
+      const taken = takeId(world, "debt");
+      let next = payAcrossHolders(
+        taken.world,
+        effect.holder,
+        effect.issuer,
+        effect.principal,
+      );
+      const loan: Loan = {
+        kind: "private",
+        id: taken.id,
+        issuer: effect.issuer,
+        holder: effect.holder,
+        principal: effect.principal,
+        installment: effect.installment,
+        months: effect.months,
+        issuerKind: effect.issuerKind,
+      };
+      next = { ...next, loans: { ...next.loans, [loan.id]: loan } };
+      return { world: next, lines: [] };
+    }
+    case "transferPrivate": {
+      const loan = world.loans[effect.instrument];
+      if (!loan || loan.kind !== "private") {
+        throw new LeakError(`no private loan ${effect.instrument}`);
+      }
+      const nextWorld = payAcrossHolders(world, effect.to, effect.from, effect.price);
+      const moved: Loan = { ...loan, holder: effect.to };
+      const next = { ...nextWorld, loans: { ...nextWorld.loans, [loan.id]: moved } };
+      const lines = [
+        ...pair(month, "debtTrade", effect.to, effect.from, effect.price),
+        ...pair(month, "Δprivate", effect.from, effect.to, loan.principal),
+      ];
+      return { world: next, lines };
+    }
+    case "writeOff": {
+      const loan = world.loans[effect.instrument];
+      if (!loan) throw new LeakError(`no loan ${effect.instrument}`);
+      return writeOffNumbers(world, loan);
+    }
+    case "seize": {
+      const loan = world.loans[effect.loan];
+      if (!loan || loan.kind !== "bank") {
+        throw new LeakError(`no bank loan ${effect.loan}`);
+      }
+      const written = writeOffNumbers(world, loan);
+      let next = written.world;
+      const house = next.houses[loan.collateral];
+      const mine = next.mines[loan.collateral];
+      if (house) {
+        next = {
+          ...next,
+          houses: {
+            ...next.houses,
+            [house.id]: { ...house, owner: loan.bank, lien: null },
+          },
+        };
+      } else if (mine) {
+        next = {
+          ...next,
+          mines: {
+            ...next.mines,
+            [mine.id]: { ...mine, owner: loan.bank, lien: null },
+          },
+        };
+      }
+      return { world: next, lines: written.lines };
+    }
+    case "depositMine": {
+      const mine = world.mines[effect.mine];
+      if (!mine) throw new LeakError(`no mine ${effect.mine}`);
+      const previous = mine.owner;
+      const taken = takeId(world, "share");
+      const bank = world.banks[effect.bank];
+      const next: World = {
+        ...taken.world,
+        mines: {
+          ...world.mines,
+          [mine.id]: { ...mine, owner: effect.bank, depositedAt: effect.bank },
+        },
+        shares: {
+          ...world.shares,
+          [taken.id]: {
+            id: taken.id,
+            bank: effect.bank,
+            holder: previous,
+            units: effect.shares,
+          },
+        },
+        banks: {
+          ...world.banks,
+          [effect.bank]: {
+            ...bank,
+            sharesOutstanding: bank.sharesOutstanding + effect.shares,
+          },
+        },
+      };
+      return { world: next, lines: [] };
+    }
+    case "dividend": {
+      const bank = world.banks[effect.bank];
+      const shares = Object.values(world.shares)
+        .filter((s) => s.bank === effect.bank)
+        .sort((x, y) => x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+      let paid = 0;
+      const cuts: { holder: Id; cut: Money }[] = [];
+      for (const share of shares) {
+        const cut = Math.floor(bank.equity * share.units / bank.sharesOutstanding);
+        if (cut > 0) {
+          cuts.push({ holder: share.holder, cut });
+          paid += cut;
+        }
+      }
+      let next = world;
+      for (const { holder, cut } of cuts) {
+        next = credit(next, holder, effect.bank, cut);
+      }
+      const b = next.banks[effect.bank];
+      next = {
+        ...next,
+        banks: {
+          ...next.banks,
+          [effect.bank]: {
+            ...b,
+            equity: b.equity - paid,
+            depositLiability: b.depositLiability - paid,
+          },
+        },
+      };
+      const lines: FlowEntry[] = [];
+      if (paid !== 0) {
+        lines.push({ month, row: "dividend", holder: effect.bank, amount: -paid });
+        for (const { holder, cut } of cuts) {
+          lines.push({ month, row: "dividend", holder, amount: cut });
+        }
+      }
+      return { world: next, lines };
+    }
+    case "post": {
+      // The gate's listing id is a placeholder. Minting here keeps two posts
+      // gated against the same world from colliding, and consumes nextId.
+      const taken = takeId(world, "list");
+      const listing = { ...effect.listing, id: taken.id };
+      return {
+        world: { ...taken.world, listings: [...world.listings, listing] },
+        lines: [],
+      };
+    }
+    case "setLoanRate": {
+      const bank = world.banks[effect.bank];
+      return {
+        world: {
+          ...world,
+          banks: {
+            ...world.banks,
+            [effect.bank]: { ...bank, loanRate: effect.rate },
+          },
+        },
+        lines: [],
+      };
+    }
+  }
+}
+
+/** Apply one effect. The result has already passed assertInvariant. */
+export function applyEffect(world: World, effect: Effect): World {
+  const { world: after, lines } = applyBare(world, effect);
+  return withFlows(world, after, linesOf(lines, world.month));
+}
+
+export function openingNfa(world: World): Record<Id, Money> {
+  const out: Record<Id, Money> = {};
+  for (const id of holderIds(world)) out[id] = nfa(world, id);
+  return out;
+}
+
+/** Inflows minus outflows equal the change in net financial assets since
+ *  `baseline`, which is the NFA snapshot from when `flows` was last empty. */
+export function assertFlowIdentity(
+  world: World,
+  baseline: Readonly<Record<Id, Money>>,
+): void {
+  const ids = new Set<Id>([...holderIds(world), ...Object.keys(baseline)]);
+  for (const id of ids) {
+    const d = nfa(world, id) - (baseline[id] ?? 0);
+    const f = world.flows.filter((l) => l.holder === id).reduce(
+      (s, l) => s + l.amount,
+      0,
+    );
+    if (d !== f) throw new LeakError(`flow column ${id}: flows ${f} ≠ ΔNFA ${d}`);
+  }
+}
