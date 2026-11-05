@@ -5,6 +5,7 @@
 import { formatBooks } from "./world/books.ts";
 import { householdLeaf } from "./bridge/household.ts";
 import { healthSceneOrders, runHealth } from "./bridge/health.ts";
+import { runLeaves } from "./bridge/spend.ts";
 import { runTechScene } from "./bridge/tech.ts";
 import { runSpecialDay, specialSceneOrders } from "./bridge/special.ts";
 import { commitDeath, runBirths } from "./bridge/kin.ts";
@@ -16,6 +17,7 @@ import { remainderDraws } from "./world/purses.ts";
 import {
   healthSeed,
   kinSeed,
+  leafSeed,
   marketSeed,
   monthSeed,
   purseSeed,
@@ -242,6 +244,27 @@ async function runScripted(ids: IdSource, clock: Clock): Promise<void> {
   p(
     `death  ben ${kin.people.ben.alive ? "alive" : "dead"}  ` +
       `h-ben ${kin.houses["h-ben"].owner}  cleo ${kin.people.cleo.dwelling ?? "none"}`,
+  );
+
+  p("\n— leaves: a mix, a reserve, a lender, a nightclub, a level —\n");
+  const leafCtx = openRig("demo-out/leaves", leafSeed(), ids, clock);
+  await runLeaves(leafCtx);
+  printScene(leafCtx);
+  const leaves = loadWorld(leafCtx.worldPath);
+  p(
+    `mix  doc ${leaves.people.doc.assignment ?? "none"}  ` +
+      `teach ${leaves.people.teach.assignment ?? "none"}`,
+  );
+  p(`level  ben ${leaves.people.ben.education.engineer}`);
+  p(
+    `spend  ada ${leaves.people.ada.deposits.a}  ben ${leaves.people.ben.deposits.a}  ` +
+      `cleo ${leaves.people.cleo.deposits.a}  shop ${leaves.firms.shop.deposits.a}`,
+  );
+  const loan = Object.values(leaves.loans).find((row) => row.kind === "private");
+  p(
+    `lender  ${loan && loan.kind === "private" ? loan.holder : "none"}  ` +
+      `principal ${loan && loan.kind === "private" ? loan.principal : 0}  ` +
+      `gov ${leaves.government.deposits.a}`,
   );
 }
 

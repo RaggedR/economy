@@ -324,6 +324,80 @@ export function healthSeed(): World {
   return world;
 }
 
+/** The four scripted leaves. Ada wants happiness, Ben wants education, Cleo
+ *  saves and can lend. Doc and teach are the public staff. The shop can pay
+ *  maintenance and still keep a reserve. */
+export function leafSeed(): World {
+  const ada = makePerson("ada", 40, 0, "happiness");
+  ada.diseases = ["d0"];
+  const ben = makePerson("ben", 40, 0, "education");
+  ben.diseases = ["d0"];
+  const cleo = makePerson("cleo", 200, 0, "savings");
+  const doc = makePerson("doc", 0, 0);
+  doc.job = { firm: "pub-hosp", career: "doctor", salary: 1 };
+  const teach = makePerson("teach", 0, 0);
+  teach.job = { firm: "pub-uni", career: "teacher", salary: 1 };
+  let world = shell({ ada, ben, cleo, doc, teach }, 280, 0);
+  world = placeFirm(world, firmShell("shop", "ada", { a: 80, b: 0 }));
+  world.firms = {
+    ...world.firms,
+    mill: firmShell("mill", "ben", { a: 0, b: 0 }, "tech"),
+    club: firmShell("club", "cleo", { a: 0, b: 0 }, "nightclub"),
+    "pub-hosp": firmShell("pub-hosp", "gov", { a: 0, b: 0 }, "publicHospital"),
+    "pub-uni": firmShell("pub-uni", "gov", { a: 0, b: 0 }, "publicUniversity"),
+    "priv-uni": firmShell("priv-uni", "gov", { a: 0, b: 0 }, "privateUniversity"),
+  };
+  world.people.ben.firm = "mill";
+  world.people.cleo.firm = "club";
+  world.firms.club.inventory = { nightclub: 1 };
+  world.firms["pub-hosp"].machines = ["m-doc"];
+  world.firms["pub-uni"].machines = ["m-teach"];
+  world.machines = {
+    "m-doc": {
+      id: "m-doc",
+      type: "doctor",
+      generation: 0,
+      owner: "pub-hosp",
+      builder: "mill",
+    },
+    "m-teach": {
+      id: "m-teach",
+      type: "teacher",
+      generation: 0,
+      owner: "pub-uni",
+      builder: "mill",
+    },
+  };
+  world.listings = [
+    {
+      id: "club-lot",
+      seller: "club",
+      kind: "good",
+      price: 10,
+      qty: 1,
+      payload: { good: "nightclub" },
+    },
+    {
+      id: "eng-level",
+      seller: "priv-uni",
+      kind: "good",
+      price: 1,
+      qty: 10,
+      payload: { good: "tuition", career: "engineer" },
+    },
+  ];
+  world.jobArchive = {
+    year: 0,
+    listings: [
+      { career: "engineer", generation: 0, salary: 8, slots: 3 },
+      { career: "retail", generation: 0, salary: 4, slots: 1 },
+    ],
+  };
+  world.government.taxLastMonth = 40;
+  assertInvariant(world);
+  return world;
+}
+
 /** Mill has delivered one generation-0 retail machine. The shop can pay for
  *  the next one. The plan offers it. Delivery is what mints generation 1. */
 export function techSeed(): World {

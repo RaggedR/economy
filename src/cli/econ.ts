@@ -9,6 +9,7 @@
 
 import { booksReport } from "../world/books.ts";
 import {
+  acceptDebtGate,
   assignGate,
   buyCureGate,
   buyTuitionGate,
@@ -378,6 +379,27 @@ function run(argv: string[], ids: IdSource, clock: Clock): { value: unknown } {
             parseBank(str(flags, "bank")),
             str(flags, "mine") ?? "",
             parseIntStrict(str(flags, "ask"), "ask"),
+          ),
+        ),
+      };
+    }
+    case "accept-debt": {
+      const current = world();
+      const kind = str(flags, "issuer-kind");
+      if (kind !== "firm" && kind !== "government") {
+        throw new Refusal("issuer-kind must be firm or government");
+      }
+      return {
+        value: commit(
+          "accept-debt",
+          acceptDebtGate(
+            current,
+            str(flags, "holder") ?? "",
+            str(flags, "issuer") ?? "",
+            parseIntStrict(str(flags, "principal"), "principal"),
+            parseIntStrict(str(flags, "installment"), "installment"),
+            parseIntStrict(str(flags, "months"), "months"),
+            kind,
           ),
         ),
       };

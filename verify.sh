@@ -24,7 +24,8 @@ books() {
       demo-out/special/world.json demo-out/special/journal.jsonl demo-out/special/intent-log.jsonl \
       demo-out/health/world.json demo-out/health/journal.jsonl demo-out/health/intent-log.jsonl \
       demo-out/tech/world.json demo-out/tech/journal.jsonl demo-out/tech/intent-log.jsonl \
-      demo-out/kin/world.json demo-out/kin/journal.jsonl demo-out/kin/intent-log.jsonl
+      demo-out/kin/world.json demo-out/kin/journal.jsonl demo-out/kin/intent-log.jsonl \
+      demo-out/leaves/world.json demo-out/leaves/journal.jsonl demo-out/leaves/intent-log.jsonl
 }
 
 OUT1="$(deno run --allow-read --allow-write src/demo.ts)"; A="$(books)"

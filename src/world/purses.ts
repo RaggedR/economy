@@ -7,6 +7,7 @@
 // household pays from its own purse, which is a separate `pay`.
 
 import { drawGate, payGate } from "./gates.ts";
+import { drawAmount } from "./policy.ts";
 import type { Effect, Id, World } from "./types.ts";
 import { applyEffect, purseOf } from "./world.ts";
 
@@ -59,7 +60,9 @@ function wagesPaidBy(world: World, firmId: Id): number {
 }
 
 /** After the capital step. Only a firm that met its opening wages is drawn.
- *  The test is the original bill, not the cash left after paying it. */
+ *  The test is the original bill, not the cash left after paying it.
+ *  The amount is the entrepreneur's reserve: cash minus last month's
+ *  maintenance, tax, and debt service. A reserve of zero draws the purse. */
 export function remainderDraws(world: World): Effect[] {
   const effects: Effect[] = [];
   let cursor = world;
@@ -68,7 +71,7 @@ export function remainderDraws(world: World): Effect[] {
     const bill = wageBill(cursor, firm.id).reduce((s, row) => s + row.salary, 0);
     const unpaid = bill - wagesPaidBy(cursor, firm.id);
     if (unpaid > 0 && cash(cursor, firm.id) < unpaid) continue;
-    const amount = cash(cursor, firm.id);
+    const amount = drawAmount(cursor, firm.id);
     if (amount === 0) continue;
     const gated = drawGate(cursor, firm.id, firm.owner, amount);
     if (!gated.ok) throw new Error(gated.reason);

@@ -53,6 +53,7 @@ export function householdLeaf(ctx: HarnessCtx, person: Id): Runner<HouseholdC> {
       "bid-education",
       "buy-cure",
       "buy-tuition",
+      "accept-debt",
     ]),
     argScope: (tool, args) => {
       if (tool === "request-loan") {
@@ -90,6 +91,10 @@ export function householdLeaf(ctx: HarnessCtx, person: Id): Runner<HouseholdC> {
         if (args.person === person) return null;
         return `${agentId} cannot bid for ${String(args.person)}`;
       }
+      if (tool === "accept-debt") {
+        if (args.holder === person) return null;
+        return `${agentId} cannot accept debt for ${String(args.holder)}`;
+      }
       return null;
     },
   };
@@ -110,6 +115,7 @@ export function householdLeaf(ctx: HarnessCtx, person: Id): Runner<HouseholdC> {
     bidEducation: decodeAct,
     buyCure: decodeAct,
     buyTuition: decodeAct,
+    acceptDebt: decodeAct,
     readBooks: decodeRead(decodeBooks),
   };
   return leafLocal(
@@ -356,6 +362,30 @@ export function householdLeaf(ctx: HarnessCtx, person: Id): Runner<HouseholdC> {
             String(params.unitsPerLevel),
           ],
           { person },
+          shape.reason,
+        ));
+      }
+      if (shape.tag === "acceptDebt") {
+        return asAct(runMutation(
+          ctx,
+          reg,
+          "accept-debt",
+          [
+            "accept-debt",
+            "--issuer",
+            shape.issuer,
+            "--holder",
+            person,
+            "--principal",
+            String(shape.principal),
+            "--installment",
+            String(shape.installment),
+            "--months",
+            String(shape.months),
+            "--issuer-kind",
+            shape.issuerKind,
+          ],
+          { holder: person },
           shape.reason,
         ));
       }

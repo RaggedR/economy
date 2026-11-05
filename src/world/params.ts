@@ -82,6 +82,16 @@ export const params = {
   /** This multiple of G in deposits, with the unit test, forces a birth. */
   fertilityMultiple: 10,
   /**
+   * Minimum deposits before `acceptDebt` exists. No spec default. One hundred
+   * minor units is the placeholder.
+   */
+  savingsThreshold: 100,
+  /**
+   * A lender accepts when disclosed revenue is at least this multiple of the
+   * installment. No spec default. Two is the placeholder.
+   */
+  revenueCover: 2,
+  /**
    * Percent chance of a voluntary birth, by objective. All zero: the
    * voluntary band is visible and does not fire. A positive weight is a
    * later calibration, not a policy chosen here.

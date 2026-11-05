@@ -158,6 +158,16 @@ export type BuyTuitionShape = {
   reason: string;
 };
 
+export type AcceptDebtShape = {
+  tag: "acceptDebt";
+  issuer: Id;
+  principal: Money;
+  installment: Money;
+  months: number;
+  issuerKind: "firm" | "government";
+  reason: string;
+};
+
 export type HouseholdC =
   | Fib<LoanShape, Act>
   | Fib<PayShape, Act>
@@ -175,6 +185,7 @@ export type HouseholdC =
   | Fib<BidEducationShape, Act>
   | Fib<BuyCureShape, Act>
   | Fib<BuyTuitionShape, Act>
+  | Fib<AcceptDebtShape, Act>
   | Fib<{ tag: "readBooks" }, Read<BooksReport>>;
 
 export type BankC =

@@ -35,8 +35,8 @@ import type {
 } from "./types.ts";
 import {
   CAREERS,
+  consumptionGood,
   diseaseOf,
-  goodOf,
   houseOf,
   isBankId,
   otherBank,
@@ -1073,8 +1073,9 @@ function applyBare(world: World, effect: Effect): { world: World; lines: FlowEnt
       }
       const listing = world.listings.find((l) => l.id === effect.listing);
       if (!listing) throw new LeakError(`no listing ${effect.listing}`);
-      if (goodOf(listing.payload) !== "staple") {
-        throw new LeakError(`${effect.listing} is not staple`);
+      const good = consumptionGood(listing.payload);
+      if (!good) {
+        throw new LeakError(`${effect.listing} is not a consumption good`);
       }
       if (listing.qty < effect.qty) {
         throw new LeakError(
@@ -1083,9 +1084,9 @@ function applyBare(world: World, effect: Effect): { world: World; lines: FlowEnt
       }
       const firm = world.firms[listing.seller];
       if (!firm) throw new LeakError(`no firm ${listing.seller}`);
-      const stock = firm.inventory.staple ?? 0;
+      const stock = firm.inventory[good] ?? 0;
       if (stock < effect.qty) {
-        throw new LeakError(`staple inventory ${stock} is short of ${effect.qty}`);
+        throw new LeakError(`${good} inventory ${stock} is short of ${effect.qty}`);
       }
       const cost = listing.price * effect.qty;
       if (!Number.isSafeInteger(cost) || cost <= 0) {
@@ -1105,14 +1106,14 @@ function applyBare(world: World, effect: Effect): { world: World; lines: FlowEnt
             ...seller,
             inventory: {
               ...seller.inventory,
-              staple: (seller.inventory.staple ?? 0) - effect.qty,
+              [good]: stock - effect.qty,
             },
           },
         },
       };
       return {
         world: next,
-        lines: pair(month, "staple", effect.buyer, listing.seller, cost),
+        lines: pair(month, good, effect.buyer, listing.seller, cost),
       };
     }
     case "tradeShare": {

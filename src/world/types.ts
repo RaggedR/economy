@@ -243,6 +243,15 @@ export function goodOf(payload: Listing["payload"]): Good | null {
   return null;
 }
 
+/** Staple, luxury food, and the nightclub. Tuition and cures have their own gates. */
+export function consumptionGood(
+  payload: Listing["payload"],
+): "staple" | "luxuryFood" | "nightclub" | null {
+  const good = goodOf(payload);
+  if (good === "staple" || good === "luxuryFood" || good === "nightclub") return good;
+  return null;
+}
+
 export type Listing = {
   id: Id;
   seller: Id;

@@ -3,6 +3,7 @@
 
 import { assertEquals } from "jsr:@std/assert@1";
 import {
+  acceptDebtGate,
   depositMineGate,
   dividendGate,
   type GateResult,
@@ -17,7 +18,7 @@ import {
   transferPrivateGate,
   writeOffGate,
 } from "./gates.ts";
-import { monthSeed, storySeed } from "./seed.ts";
+import { monthSeed, purseSeed, storySeed } from "./seed.ts";
 import { collateralValue, markedMineBase } from "./world.ts";
 import type { World } from "./types.ts";
 
@@ -42,6 +43,13 @@ function mineOwnedByAda(w: World): World {
     },
   };
 }
+
+Deno.test("acceptDebt under the savings threshold cannot be held", () => {
+  const gated = acceptDebtGate(purseSeed(), "cleo", "gov", 10, 10, 1, "government");
+  assertEquals(gated.ok, false);
+  if (gated.ok) return;
+  assertEquals(gated.reason.includes("savings threshold"), true);
+});
 
 Deno.test("schedule, funds, and the same party cannot be held", () => {
   const w = storySeed();

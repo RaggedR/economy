@@ -21,8 +21,17 @@ import type { ReconcileReport } from "../log/reconcile.ts";
 import type { BooksReport } from "../world/books.ts";
 import { payGate } from "../world/gates.ts";
 import { planOpening } from "../world/fold.ts";
+import {
+  DOCTOR_REASON,
+  doctorMix,
+  householdSpend,
+  TEACHER_REASON,
+  teacherMix,
+  trainingBids,
+} from "../world/policy.ts";
 import { remainderDraws } from "../world/purses.ts";
 import { runDiscretionary, runDisease, runPublic } from "./health.ts";
+import { runSpend } from "./spend.ts";
 import { runBirths, settleDead } from "./kin.ts";
 import { runTech } from "./tech.ts";
 import { runSpecialDay } from "./special.ts";
@@ -77,8 +86,16 @@ export async function runMonth(ctx: HarnessCtx): Promise<MonthResult> {
   // Disease, with the opening. monthSeed's two draws miss, so the journal
   // stays pay then lendBank. The stream still advances.
   runDisease(ctx);
-  // The mix and the bids are handed in. The month prefix hands nothing.
-  await runPublic(ctx, {});
+  // The mix and the training bids are the scripted policies. monthSeed has
+  // no public staff and an empty archive, so this still hands nothing.
+  const observed = loadWorld(ctx.worldPath);
+  await runPublic(ctx, {
+    doctors: doctorMix(observed),
+    teachers: teacherMix(observed),
+    education: trainingBids(observed),
+    doctorReason: DOCTOR_REASON,
+    teacherReason: TEACHER_REASON,
+  });
 
   // 2. Both households owe a reply. The shapes are fixed before either runs.
   //    Ada's loan is inside the LTV. Ben's is not. The gate refuses Ben.
@@ -144,6 +161,9 @@ export async function runMonth(ctx: HarnessCtx): Promise<MonthResult> {
   await runTech(ctx, {});
 
   await runDiscretionary(ctx, {});
+  // Objective spend. monthSeed has no luxury, nightclub, tuition, or cure
+  // listing, so the policy names nothing and nothing is asked.
+  await runSpend(ctx, householdSpend(loadWorld(ctx.worldPath)));
 
   // After the capital step. Remainder of a solvent firm goes to its owner.
   // A folded firm is skipped.

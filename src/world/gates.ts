@@ -17,6 +17,7 @@ import type {
   World,
 } from "./types.ts";
 import {
+  consumptionGood,
   diseaseOf,
   FLOW_ROWS,
   goodOf,
@@ -139,14 +140,15 @@ export function fillGate(
   if (qty === 0) return ok({ tag: "fill", listing: listingId, buyer, qty: 0 });
   const listing = world.listings.find((l) => l.id === listingId);
   if (!listing) return refused(`no listing ${listingId}`);
-  if (goodOf(listing.payload) !== "staple") return refused(`${listingId} is not staple`);
+  const good = consumptionGood(listing.payload);
+  if (!good) return refused(`${listingId} is not a consumption good`);
   if (listing.qty < qty) {
     return refused(`listing ${listingId} has ${listing.qty}, short of ${qty}`);
   }
   const firm = world.firms[listing.seller];
   if (!firm) return refused(`no firm ${listing.seller}`);
-  const stock = firm.inventory.staple ?? 0;
-  if (stock < qty) return refused(`staple inventory ${stock} is short of ${qty}`);
+  const stock = firm.inventory[good] ?? 0;
+  if (stock < qty) return refused(`${good} inventory ${stock} is short of ${qty}`);
   const cost = listing.price * qty;
   if (!Number.isSafeInteger(cost)) return refused("price × qty is not a safe integer");
   const short = funds(world, buyer, cost);
@@ -258,6 +260,36 @@ export function issueDebtGate(
   months: number,
   issuerKind: "firm" | "government",
 ): GateResult {
+  return issuePrivateGate(
+    world,
+    issuer,
+    holder,
+    principal,
+    installment,
+    months,
+    issuerKind,
+  );
+}
+
+/** The shape exists only at the savings threshold. The revenue test is the
+ *  leaf's, and a decline is silence: this gate is not that decline. */
+export function acceptDebtGate(
+  world: World,
+  holder: Id,
+  issuer: Id,
+  principal: Money,
+  installment: Money,
+  months: number,
+  issuerKind: "firm" | "government",
+): GateResult {
+  const purse = purseOf(world, holder);
+  if (!purse) return refused(`no purse for ${holder}`);
+  const cash = purse.a + purse.b;
+  if (cash < params.savingsThreshold) {
+    return refused(
+      `${holder} holds ${cash}, under the savings threshold ${params.savingsThreshold}`,
+    );
+  }
   return issuePrivateGate(
     world,
     issuer,
