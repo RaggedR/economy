@@ -3,8 +3,29 @@
 // no other way to build an effect that the command surface will commit.
 
 import { params } from "./params.ts";
-import type { BankId, Effect, FlowRow, Id, Money, Qty, Rate, World } from "./types.ts";
-import { FLOW_ROWS, goodOf, isBankId } from "./types.ts";
+import type {
+  BankId,
+  Career,
+  Disease,
+  Effect,
+  FlowRow,
+  Id,
+  MachineType,
+  Money,
+  Qty,
+  Rate,
+  World,
+} from "./types.ts";
+import {
+  diseaseOf,
+  FLOW_ROWS,
+  goodOf,
+  houseOf,
+  isBankId,
+  isDisease,
+  shareBank,
+  tuitionCareer,
+} from "./types.ts";
 import { collateralValue, markedMineBase, purseOf } from "./world.ts";
 
 export type GateResult =
@@ -415,4 +436,545 @@ export function requestLoanGate(
     return refused(`leverage: ${outstanding + amount} exceeds ceiling ${ceiling}`);
   }
   return scheduled;
+}
+
+function shareUnits(world: World, holder: Id, bank: BankId): Qty {
+  let n = 0;
+  for (const share of Object.values(world.shares)) {
+    if (share.holder === holder && share.bank === bank) n += share.units;
+  }
+  return n;
+}
+
+/** A holder posts units of one bank. Listed units cannot exceed the holding. */
+export function postShareGate(
+  world: World,
+  holder: Id,
+  bank: BankId,
+  price: Money,
+  qty: Qty,
+): GateResult {
+  const bad = posInt(price, "price") ?? posInt(qty, "qty");
+  if (bad) return refused(bad);
+  const person = world.people[holder];
+  if (!person || !person.alive) return refused(`no living person ${holder}`);
+  const held = shareUnits(world, holder, bank);
+  const already = world.listings.filter((l) =>
+    l.seller === holder && l.kind === "share" && shareBank(l.payload) === bank
+  ).reduce((s, l) => s + l.qty, 0);
+  if (already + qty > held) {
+    return refused(`qty ${qty} plus listed ${already} exceeds ${bank} shares ${held}`);
+  }
+  return ok({
+    tag: "post",
+    listing: {
+      id: "",
+      seller: holder,
+      kind: "share",
+      price,
+      qty,
+      payload: { bank },
+    },
+  });
+}
+
+/** A zero qty is a legal bid that bought nothing. */
+export function tradeShareGate(
+  world: World,
+  listingId: Id,
+  buyer: Id,
+  qty: Qty,
+): GateResult {
+  if (!Number.isInteger(qty) || qty < 0) {
+    return refused("qty must be a non-negative integer");
+  }
+  const person = world.people[buyer];
+  if (!person || !person.alive) return refused(`no living person ${buyer}`);
+  if (qty === 0) return ok({ tag: "tradeShare", listing: listingId, buyer, qty: 0 });
+  const listing = world.listings.find((l) => l.id === listingId);
+  if (!listing || listing.kind !== "share") {
+    return refused(`no share listing ${listingId}`);
+  }
+  const bank = shareBank(listing.payload);
+  if (!bank) return refused(`${listingId} names no bank`);
+  if (listing.seller === buyer) return refused(`${buyer} cannot buy their own shares`);
+  if (listing.qty < qty) {
+    return refused(`listing ${listingId} has ${listing.qty}, short of ${qty}`);
+  }
+  if (shareUnits(world, listing.seller, bank) < qty) {
+    return refused(`${listing.seller} holds fewer than ${qty} ${bank} shares`);
+  }
+  const cost = listing.price * qty;
+  if (!Number.isSafeInteger(cost)) return refused("price × qty is not a safe integer");
+  const short = funds(world, buyer, cost);
+  if (short) return refused(short);
+  return ok({ tag: "tradeShare", listing: listingId, buyer, qty });
+}
+
+export function postHouseGate(
+  world: World,
+  owner: Id,
+  houseId: Id,
+  ask: Money,
+): GateResult {
+  const bad = posInt(ask, "ask");
+  if (bad) return refused(bad);
+  const house = world.houses[houseId];
+  if (!house) return refused(`no house ${houseId}`);
+  if (house.owner !== owner) return refused(`${owner} does not own ${houseId}`);
+  if (house.lien) return refused(`lien blocks sale of ${houseId}`);
+  if (
+    world.listings.some((l) =>
+      l.kind === "houseSale" && houseOf(l.payload) === houseId && l.qty > 0
+    )
+  ) {
+    return refused(`${houseId} is already offered`);
+  }
+  return ok({
+    tag: "post",
+    listing: {
+      id: "",
+      seller: owner,
+      kind: "houseSale",
+      price: ask,
+      qty: 1,
+      payload: { house: houseId },
+    },
+  });
+}
+
+export function transferHouseGate(
+  world: World,
+  listingId: Id,
+  buyer: Id,
+  qty: Qty,
+): GateResult {
+  if (qty !== 0 && qty !== 1) return refused("a house sells as one unit or none");
+  const person = world.people[buyer];
+  if (!person || !person.alive) return refused(`no living person ${buyer}`);
+  if (qty === 0) return ok({ tag: "transferHouse", listing: listingId, buyer, qty: 0 });
+  const listing = world.listings.find((l) => l.id === listingId);
+  if (!listing || listing.kind !== "houseSale") {
+    return refused(`no house listing ${listingId}`);
+  }
+  const houseId = houseOf(listing.payload);
+  const house = houseId ? world.houses[houseId] : undefined;
+  if (!house) return refused(`listing ${listingId} names no house`);
+  if (house.lien) return refused(`lien blocks sale of ${house.id}`);
+  if (house.owner !== listing.seller) {
+    return refused(`${listing.seller} does not own ${house.id}`);
+  }
+  if (buyer === listing.seller) return refused(`${buyer} already owns ${house.id}`);
+  const short = funds(world, buyer, listing.price);
+  if (short) return refused(short);
+  return ok({ tag: "transferHouse", listing: listingId, buyer, qty: 1 });
+}
+
+export function occupyGate(
+  world: World,
+  owner: Id,
+  houseId: Id,
+  mode: "occupy" | "let",
+): GateResult {
+  const house = world.houses[houseId];
+  if (!house) return refused(`no house ${houseId}`);
+  if (house.owner !== owner) return refused(`${owner} does not own ${houseId}`);
+  const person = world.people[owner];
+  if (!person || !person.alive) return refused(`no living person ${owner}`);
+  return ok({ tag: "occupy", house: houseId, mode });
+}
+
+export function postJobGate(
+  world: World,
+  firmId: Id,
+  career: Career,
+  generation: number,
+  salary: Money,
+  slots: number,
+): GateResult {
+  const bad = posInt(salary, "salary") ?? posInt(slots, "slots");
+  if (bad) return refused(bad);
+  if (!Number.isInteger(generation) || generation < 0) {
+    return refused("generation must be a non-negative integer");
+  }
+  const firm = world.firms[firmId];
+  if (!firm) return refused(`no firm ${firmId}`);
+  if (firm.folded) return refused(`${firmId} has folded`);
+  return ok({
+    tag: "post",
+    listing: {
+      id: "",
+      seller: firmId,
+      kind: "job",
+      price: salary,
+      qty: slots,
+      payload: { career, generation, salary, slots },
+    },
+  });
+}
+
+export function hireGate(
+  world: World,
+  listingId: Id,
+  personId: Id,
+  seated: boolean,
+  keep: boolean,
+): GateResult {
+  const person = world.people[personId];
+  if (!person || !person.alive) return refused(`no living person ${personId}`);
+  const listing = world.listings.find((l) => l.id === listingId);
+  if (
+    !listing || listing.kind !== "job" || !listing.payload ||
+    !("career" in listing.payload)
+  ) {
+    return refused(`no job listing ${listingId}`);
+  }
+  const payload = listing.payload;
+  if (!("generation" in payload)) return refused(`${listingId} is not a job`);
+  if (!seated) {
+    return ok({ tag: "hire", listing: listingId, person: personId, seated: false, keep });
+  }
+  const incumbent = person.job !== null && person.job.firm === listing.seller &&
+    person.job.career === payload.career;
+  if (keep && !incumbent) return refused(`${personId} is not the incumbent`);
+  if (!keep && person.education[payload.career] < payload.generation) {
+    return refused(
+      `${personId} is at level ${
+        person.education[payload.career]
+      } in ${payload.career}, short of ${payload.generation}`,
+    );
+  }
+  if (listing.qty < 1) return refused(`listing ${listingId} has no seat left`);
+  return ok({ tag: "hire", listing: listingId, person: personId, seated: true, keep });
+}
+
+export function postMachineGate(
+  world: World,
+  firmId: Id,
+  type: MachineType,
+  generation: number,
+  price: Money,
+  qty: Qty,
+): GateResult {
+  const bad = posInt(price, "price") ?? posInt(qty, "qty");
+  if (bad) return refused(bad);
+  if (!Number.isInteger(generation) || generation < 0) {
+    return refused("generation must be a non-negative integer");
+  }
+  const firm = world.firms[firmId];
+  if (!firm) return refused(`no firm ${firmId}`);
+  if (firm.folded) return refused(`${firmId} has folded`);
+  if (firm.kind !== "tech") return refused(`${firmId} is not a tech firm`);
+  return ok({
+    tag: "post",
+    listing: {
+      id: "",
+      seller: firmId,
+      kind: "machine",
+      price,
+      qty,
+      payload: { type, generation },
+    },
+  });
+}
+
+export function deliverMachineGate(
+  world: World,
+  listingId: Id,
+  firmId: Id,
+  qty: Qty,
+): GateResult {
+  if (!Number.isInteger(qty) || qty < 0) {
+    return refused("qty must be a non-negative integer");
+  }
+  const firm = world.firms[firmId];
+  if (!firm) return refused(`no firm ${firmId}`);
+  if (firm.folded) return refused(`${firmId} has folded`);
+  if (qty === 0) {
+    return ok({ tag: "deliverMachine", listing: listingId, firm: firmId, qty: 0 });
+  }
+  const listing = world.listings.find((l) => l.id === listingId);
+  if (!listing || listing.kind !== "machine") {
+    return refused(`no machine listing ${listingId}`);
+  }
+  if (listing.seller === firmId) return refused(`${firmId} cannot buy its own machine`);
+  if (listing.qty < qty) {
+    return refused(`listing ${listingId} has ${listing.qty}, short of ${qty}`);
+  }
+  const cost = listing.price * qty;
+  if (!Number.isSafeInteger(cost)) return refused("price × qty is not a safe integer");
+  const short = funds(world, firmId, cost);
+  if (short) return refused(short);
+  return ok({ tag: "deliverMachine", listing: listingId, firm: firmId, qty });
+}
+
+export function postRentGate(
+  world: World,
+  owner: Id,
+  houseId: Id,
+  rent: Money,
+): GateResult {
+  const bad = posInt(rent, "rent");
+  if (bad) return refused(bad);
+  const house = world.houses[houseId];
+  if (!house) return refused(`no house ${houseId}`);
+  if (house.owner !== owner) return refused(`${owner} does not own ${houseId}`);
+  if (house.occupant === owner) return refused(`${owner} occupies ${houseId}`);
+  if (
+    world.listings.some((l) =>
+      l.kind === "rent" && houseOf(l.payload) === houseId && l.qty > 0
+    )
+  ) {
+    return refused(`${houseId} is already listed for rent`);
+  }
+  return ok({
+    tag: "post",
+    listing: {
+      id: "",
+      seller: owner,
+      kind: "rent",
+      price: rent,
+      qty: 1,
+      payload: { house: houseId },
+    },
+  });
+}
+
+/** Inability to pay the posted year is a refusal. A solvent loss still commits. */
+export function rentGate(
+  world: World,
+  listingId: Id,
+  tenant: Id,
+  pay: boolean,
+): GateResult {
+  const person = world.people[tenant];
+  if (!person || !person.alive) return refused(`no living person ${tenant}`);
+  const listing = world.listings.find((l) => l.id === listingId);
+  if (!listing || listing.kind !== "rent") return refused(`no rent listing ${listingId}`);
+  const short = funds(world, tenant, listing.price);
+  if (short) return refused(short);
+  if (pay && listing.qty < 1) return refused(`listing ${listingId} is already let`);
+  return ok({ tag: "rent", listing: listingId, tenant, pay });
+}
+
+export function pinHealthGate(world: World, personId: Id): GateResult {
+  const person = world.people[personId];
+  if (!person) return refused(`no person ${personId}`);
+  if (!person.alive) return refused(`${personId} is already dead`);
+  if (person.dwelling !== null) return refused(`${personId} has a dwelling`);
+  return ok({ tag: "pinHealth", person: personId, cause: "homeless" });
+}
+
+/** The disease cause carries the identity. A disease already on the person is
+ *  not a second pin. */
+export function diseaseGate(world: World, personId: Id, disease: Disease): GateResult {
+  if (!isDisease(disease)) return refused(`unknown disease ${disease}`);
+  const person = world.people[personId];
+  if (!person) return refused(`no person ${personId}`);
+  if (!person.alive) return refused(`${personId} is already dead`);
+  if (person.diseases.includes(disease)) {
+    return refused(`${personId} already has ${disease}`);
+  }
+  return ok({ tag: "pinHealth", person: personId, cause: "disease", disease });
+}
+
+function publicPost(
+  world: World,
+  personId: Id,
+  career: "doctor" | "teacher",
+): string | null {
+  const person = world.people[personId];
+  if (!person) return `no person ${personId}`;
+  if (!person.alive) return `${personId} is already dead`;
+  const job = person.job;
+  if (!job || job.career !== career) return `${personId} is not a ${career}`;
+  const firm = world.firms[job.firm];
+  if (!firm || firm.folded) return `${personId} has no open employer`;
+  const kind = career === "doctor" ? "publicHospital" : "publicUniversity";
+  if (firm.kind !== kind) return `${personId} does not work at a ${kind}`;
+  return null;
+}
+
+/** A doctor is pointed at a disease. A teacher is pointed at a career. Null clears. */
+export function assignGate(
+  world: World,
+  personId: Id,
+  specialty: Disease | Career | null,
+): GateResult {
+  if (specialty === null) {
+    const bad = publicPost(world, personId, "doctor") &&
+      publicPost(world, personId, "teacher");
+    if (bad) return refused(`${personId} is not public staff`);
+    return ok({ tag: "assign", person: personId, specialty: null });
+  }
+  if (isDisease(specialty)) {
+    const bad = publicPost(world, personId, "doctor");
+    if (bad) return refused(bad);
+    return ok({ tag: "assign", person: personId, specialty });
+  }
+  const bad = publicPost(world, personId, "teacher");
+  if (bad) return refused(bad);
+  return ok({ tag: "assign", person: personId, specialty });
+}
+
+/** A lost bid still commits. The person must hold the disease either way. */
+export function cureGate(
+  world: World,
+  personId: Id,
+  disease: Disease,
+  granted: boolean,
+): GateResult {
+  const person = world.people[personId];
+  if (!person) return refused(`no person ${personId}`);
+  if (!person.alive) return refused(`${personId} is already dead`);
+  if (!person.diseases.includes(disease)) {
+    return refused(`${personId} does not have ${disease}`);
+  }
+  return ok({ tag: "cure", person: personId, disease, granted });
+}
+
+export function levelUpGate(
+  world: World,
+  personId: Id,
+  career: Career,
+  granted: boolean,
+): GateResult {
+  const person = world.people[personId];
+  if (!person) return refused(`no person ${personId}`);
+  if (!person.alive) return refused(`${personId} is already dead`);
+  return ok({ tag: "levelUp", person: personId, career, granted });
+}
+
+export function postCureGate(
+  world: World,
+  firmId: Id,
+  disease: Disease,
+  price: Money,
+  qty: Qty,
+): GateResult {
+  const bad = posInt(price, "price") ?? posInt(qty, "qty");
+  if (bad) return refused(bad);
+  const firm = world.firms[firmId];
+  if (!firm) return refused(`no firm ${firmId}`);
+  if (firm.folded) return refused(`${firmId} has folded`);
+  if (firm.kind !== "privateHospital") {
+    return refused(`${firmId} is not a private hospital`);
+  }
+  return ok({
+    tag: "post",
+    listing: {
+      id: "",
+      seller: firmId,
+      kind: "cure",
+      price,
+      qty,
+      payload: { disease },
+    },
+  });
+}
+
+export function postTuitionGate(
+  world: World,
+  firmId: Id,
+  career: Career,
+  price: Money,
+  qty: Qty,
+): GateResult {
+  const bad = posInt(price, "price") ?? posInt(qty, "qty");
+  if (bad) return refused(bad);
+  const firm = world.firms[firmId];
+  if (!firm) return refused(`no firm ${firmId}`);
+  if (firm.folded) return refused(`${firmId} has folded`);
+  if (firm.kind !== "privateUniversity") {
+    return refused(`${firmId} is not a private university`);
+  }
+  return ok({
+    tag: "post",
+    listing: {
+      id: "",
+      seller: firmId,
+      kind: "good",
+      price,
+      qty,
+      payload: { good: "tuition", career },
+    },
+  });
+}
+
+function bundleQty(qty: Qty, bundle: Qty, name: string): string | null {
+  if (qty !== 0 && qty !== bundle) return `${name} qty must be 0 or ${bundle}`;
+  return null;
+}
+
+/** Inability to pay the posted bundle is a refusal. A short listing commits
+ *  qty 0. The buyer must hold the disease either way. */
+export function buyCureGate(
+  world: World,
+  personId: Id,
+  disease: Disease,
+  listingId: Id,
+  qty: Qty,
+): GateResult {
+  const bad = bundleQty(qty, params.cureSize, "cure");
+  if (bad) return refused(bad);
+  const person = world.people[personId];
+  if (!person) return refused(`no person ${personId}`);
+  if (!person.alive) return refused(`${personId} is already dead`);
+  if (!person.diseases.includes(disease)) {
+    return refused(`${personId} does not have ${disease}`);
+  }
+  if (qty === 0) {
+    return ok({ tag: "buyCure", person: personId, listing: listingId, qty: 0 });
+  }
+  const listing = world.listings.find((row) => row.id === listingId);
+  if (!listing || listing.kind !== "cure") return refused(`no cure listing ${listingId}`);
+  if (diseaseOf(listing.payload) !== disease) {
+    return refused(`${listingId} is not ${disease}`);
+  }
+  const firm = world.firms[listing.seller];
+  if (!firm || firm.kind !== "privateHospital") {
+    return refused(`${listingId} is not a private hospital`);
+  }
+  if (listing.qty < qty) {
+    return refused(`listing ${listingId} has ${listing.qty}, short of ${qty}`);
+  }
+  const cost = listing.price * qty;
+  if (!Number.isSafeInteger(cost)) return refused("price × qty is not a safe integer");
+  const short = funds(world, personId, cost);
+  if (short) return refused(short);
+  return ok({ tag: "buyCure", person: personId, listing: listingId, qty });
+}
+
+export function buyTuitionGate(
+  world: World,
+  personId: Id,
+  career: Career,
+  listingId: Id,
+  qty: Qty,
+): GateResult {
+  const bad = bundleQty(qty, params.unitsPerLevel, "tuition");
+  if (bad) return refused(bad);
+  const person = world.people[personId];
+  if (!person) return refused(`no person ${personId}`);
+  if (!person.alive) return refused(`${personId} is already dead`);
+  if (qty === 0) {
+    return ok({ tag: "buyTuition", person: personId, listing: listingId, qty: 0 });
+  }
+  const listing = world.listings.find((row) => row.id === listingId);
+  if (!listing) return refused(`no tuition listing ${listingId}`);
+  if (tuitionCareer(listing.payload) !== career) {
+    return refused(`${listingId} is not ${career}`);
+  }
+  const firm = world.firms[listing.seller];
+  if (!firm || firm.kind !== "privateUniversity") {
+    return refused(`${listingId} is not a private university`);
+  }
+  if (listing.qty < qty) {
+    return refused(`listing ${listingId} has ${listing.qty}, short of ${qty}`);
+  }
+  const cost = listing.price * qty;
+  if (!Number.isSafeInteger(cost)) return refused("price × qty is not a safe integer");
+  const short = funds(world, personId, cost);
+  if (short) return refused(short);
+  return ok({ tag: "buyTuition", person: personId, listing: listingId, qty });
 }

@@ -23,11 +23,22 @@ import type {
   FlowEntry,
   Id,
   Loan,
+  Machine,
   Material,
   Money,
+  Qty,
   World,
 } from "./types.ts";
-import { goodOf, isBankId, otherBank, signedInterbank } from "./types.ts";
+import {
+  diseaseOf,
+  goodOf,
+  houseOf,
+  isBankId,
+  otherBank,
+  shareBank,
+  signedInterbank,
+  tuitionCareer,
+} from "./types.ts";
 
 export class LeakError extends Error {
   constructor(message: string) {
@@ -312,6 +323,71 @@ function payAcrossHolders(world: World, from: Id, to: Id, amount: Money): World 
     throw new LeakError(`pay of ${amount} from ${from} could not be funded`);
   }
   return next;
+}
+
+/** Share units move. The bank's shares outstanding do not. A buyer with no
+ *  record of that bank receives a new one. An emptied record is dropped. */
+function moveShareUnits(
+  world: World,
+  bank: BankId,
+  from: Id,
+  to: Id,
+  qty: Qty,
+): World {
+  if (from === to) throw new LeakError(`${from} cannot buy their own shares`);
+  let left = qty;
+  let shares = { ...world.shares };
+  const records = Object.values(shares)
+    .filter((share) => share.bank === bank && share.holder === from)
+    .sort((x, y) => x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+  for (const rec of records) {
+    if (left <= 0) break;
+    const take = Math.min(rec.units, left);
+    left -= take;
+    if (rec.units === take) {
+      const { [rec.id]: _gone, ...rest } = shares;
+      shares = rest;
+    } else {
+      shares = { ...shares, [rec.id]: { ...rec, units: rec.units - take } };
+    }
+  }
+  if (left !== 0) {
+    throw new LeakError(`${from} holds too few ${bank} shares to move ${qty}`);
+  }
+  const held = Object.values(shares)
+    .filter((share) => share.bank === bank && share.holder === to)
+    .sort((x, y) => x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+  if (held.length > 0) {
+    const rec = held[0];
+    return {
+      ...world,
+      shares: { ...shares, [rec.id]: { ...rec, units: rec.units + qty } },
+    };
+  }
+  const taken = takeId({ ...world, shares }, "share");
+  return {
+    ...taken.world,
+    shares: {
+      ...taken.world.shares,
+      [taken.id]: { id: taken.id, bank, holder: to, units: qty },
+    },
+  };
+}
+
+/** Anyone whose dwelling is this house loses it, and the house loses its occupant. */
+function clearDwelling(world: World, houseId: Id): World {
+  const house = world.houses[houseId];
+  if (!house) return world;
+  let people = world.people;
+  for (const person of Object.values(people)) {
+    if (person.dwelling !== houseId) continue;
+    people = { ...people, [person.id]: { ...person, dwelling: null } };
+  }
+  return {
+    ...world,
+    people,
+    houses: { ...world.houses, [houseId]: { ...house, occupant: null } },
+  };
 }
 
 /** Pay `amount` to a bank. Funds at that bank are destroyed into equity, so the
@@ -766,6 +842,465 @@ function applyBare(world: World, effect: Effect): { world: World; lines: FlowEnt
       return {
         world: next,
         lines: pair(month, "staple", effect.buyer, listing.seller, cost),
+      };
+    }
+    case "tradeShare": {
+      if (effect.qty === 0) return { world, lines: [] };
+      const listing = world.listings.find((l) => l.id === effect.listing);
+      if (!listing || listing.kind !== "share") {
+        throw new LeakError(`no share listing ${effect.listing}`);
+      }
+      const bank = shareBank(listing.payload);
+      if (!bank) throw new LeakError(`${effect.listing} names no bank`);
+      if (listing.qty < effect.qty) {
+        throw new LeakError(
+          `listing ${effect.listing} has ${listing.qty}, short of ${effect.qty}`,
+        );
+      }
+      const cost = listing.price * effect.qty;
+      if (!Number.isSafeInteger(cost) || cost <= 0) {
+        throw new LeakError(`price × qty ${cost} is not a positive safe integer`);
+      }
+      let next = payAcrossHolders(world, effect.buyer, listing.seller, cost);
+      next = moveShareUnits(next, bank, listing.seller, effect.buyer, effect.qty);
+      next = {
+        ...next,
+        listings: next.listings.map((l) =>
+          l.id === listing.id ? { ...l, qty: l.qty - effect.qty } : l
+        ),
+      };
+      return {
+        world: next,
+        lines: pair(month, "shareTrade", effect.buyer, listing.seller, cost),
+      };
+    }
+    case "transferHouse": {
+      if (effect.qty === 0) return { world, lines: [] };
+      if (effect.qty !== 1) {
+        throw new LeakError(`a house sells as one unit, not ${effect.qty}`);
+      }
+      const listing = world.listings.find((l) => l.id === effect.listing);
+      if (!listing || listing.kind !== "houseSale") {
+        throw new LeakError(`no house listing ${effect.listing}`);
+      }
+      const houseId = houseOf(listing.payload);
+      const house = houseId ? world.houses[houseId] : undefined;
+      if (!house) throw new LeakError(`listing ${effect.listing} names no house`);
+      if (house.lien) throw new LeakError(`lien blocks transfer of ${house.id}`);
+      if (house.owner !== listing.seller) {
+        throw new LeakError(`${listing.seller} does not own ${house.id}`);
+      }
+      if (listing.qty < 1) {
+        throw new LeakError(`listing ${effect.listing} is already filled`);
+      }
+      const cost = listing.price;
+      let next = payAcrossHolders(world, effect.buyer, listing.seller, cost);
+      next = clearDwelling(next, house.id);
+      next = {
+        ...next,
+        houses: {
+          ...next.houses,
+          [house.id]: { ...next.houses[house.id], owner: effect.buyer, occupant: null },
+        },
+        listings: next.listings.map((l) =>
+          l.id === listing.id ? { ...l, qty: l.qty - 1 } : l
+        ),
+      };
+      return {
+        world: next,
+        lines: pair(month, "houseTrade", effect.buyer, listing.seller, cost),
+      };
+    }
+    case "occupy": {
+      const house = world.houses[effect.house];
+      if (!house) throw new LeakError(`no house ${effect.house}`);
+      const owner = world.people[house.owner];
+      if (!owner || !owner.alive) throw new LeakError(`no living owner for ${house.id}`);
+      if (effect.mode === "let") {
+        if (house.occupant !== owner.id) return { world, lines: [] };
+        return {
+          world: {
+            ...world,
+            people: {
+              ...world.people,
+              [owner.id]: {
+                ...owner,
+                dwelling: owner.dwelling === house.id ? null : owner.dwelling,
+              },
+            },
+            houses: { ...world.houses, [house.id]: { ...house, occupant: null } },
+          },
+          lines: [],
+        };
+      }
+      let next = world;
+      if (house.occupant && house.occupant !== owner.id) {
+        next = clearDwelling(next, house.id);
+      }
+      const moved = next.people[owner.id];
+      if (moved.dwelling && moved.dwelling !== house.id) {
+        const left = next.houses[moved.dwelling];
+        if (left && left.occupant === owner.id) {
+          next = {
+            ...next,
+            houses: { ...next.houses, [left.id]: { ...left, occupant: null } },
+          };
+        }
+      }
+      return {
+        world: {
+          ...next,
+          people: {
+            ...next.people,
+            [owner.id]: { ...next.people[owner.id], dwelling: house.id },
+          },
+          houses: {
+            ...next.houses,
+            [house.id]: { ...next.houses[house.id], occupant: owner.id },
+          },
+        },
+        lines: [],
+      };
+    }
+    case "hire": {
+      if (!effect.seated) return { world, lines: [] };
+      const listing = world.listings.find((l) => l.id === effect.listing);
+      if (
+        !listing || listing.kind !== "job" || !listing.payload ||
+        !("career" in listing.payload)
+      ) {
+        throw new LeakError(`no job listing ${effect.listing}`);
+      }
+      const payload = listing.payload;
+      if (!("generation" in payload) || !("salary" in payload)) {
+        throw new LeakError(`${effect.listing} is not a job`);
+      }
+      const person = world.people[effect.person];
+      if (!person || !person.alive) {
+        throw new LeakError(`no living person ${effect.person}`);
+      }
+      const incumbent = person.job !== null && person.job.firm === listing.seller &&
+        person.job.career === payload.career;
+      if (effect.keep && !incumbent) {
+        throw new LeakError(`${person.id} is not the incumbent`);
+      }
+      if (!effect.keep && person.education[payload.career] < payload.generation) {
+        throw new LeakError(
+          `${person.id} is at level ${
+            person.education[payload.career]
+          } in ${payload.career}`,
+        );
+      }
+      if (listing.qty < 1) throw new LeakError(`listing ${listing.id} has no seat left`);
+      const salary = incumbent && person.job ? person.job.salary : payload.salary;
+      return {
+        world: {
+          ...world,
+          listings: world.listings.map((l) =>
+            l.id === listing.id ? { ...l, qty: l.qty - 1 } : l
+          ),
+          people: {
+            ...world.people,
+            [person.id]: {
+              ...person,
+              job: { firm: listing.seller, career: payload.career, salary },
+            },
+          },
+        },
+        lines: [],
+      };
+    }
+    case "deliverMachine": {
+      if (effect.qty === 0) return { world, lines: [] };
+      const listing = world.listings.find((l) => l.id === effect.listing);
+      if (
+        !listing || listing.kind !== "machine" || !listing.payload ||
+        !("type" in listing.payload)
+      ) {
+        throw new LeakError(`no machine listing ${effect.listing}`);
+      }
+      const offer = listing.payload;
+      if (!("generation" in offer)) {
+        throw new LeakError(`${effect.listing} is not a machine`);
+      }
+      const buyer = world.firms[effect.firm];
+      if (!buyer) throw new LeakError(`no firm ${effect.firm}`);
+      if (!world.firms[listing.seller]) throw new LeakError(`no firm ${listing.seller}`);
+      if (listing.qty < effect.qty) {
+        throw new LeakError(
+          `listing ${listing.id} has ${listing.qty}, short of ${effect.qty}`,
+        );
+      }
+      const cost = listing.price * effect.qty;
+      if (!Number.isSafeInteger(cost) || cost <= 0) {
+        throw new LeakError(`price × qty ${cost} is not a positive safe integer`);
+      }
+      let next = payAcrossHolders(world, effect.firm, listing.seller, cost);
+      const made: Machine[] = [];
+      for (let i = 0; i < effect.qty; i++) {
+        const taken = takeId(next, "machine");
+        const machine: Machine = {
+          id: taken.id,
+          type: offer.type,
+          generation: offer.generation,
+          owner: effect.firm,
+          builder: listing.seller,
+        };
+        made.push(machine);
+        next = {
+          ...taken.world,
+          machines: { ...taken.world.machines, [machine.id]: machine },
+        };
+      }
+      const firm = next.firms[effect.firm];
+      next = {
+        ...next,
+        listings: next.listings.map((l) =>
+          l.id === listing.id ? { ...l, qty: l.qty - effect.qty } : l
+        ),
+        firms: {
+          ...next.firms,
+          [firm.id]: { ...firm, machines: [...firm.machines, ...made.map((m) => m.id)] },
+        },
+      };
+      return {
+        world: next,
+        lines: pair(month, "machinePurchase", effect.firm, listing.seller, cost),
+      };
+    }
+    case "rent": {
+      if (!effect.pay) return { world, lines: [] };
+      const listing = world.listings.find((l) => l.id === effect.listing);
+      if (!listing || listing.kind !== "rent") {
+        throw new LeakError(`no rent listing ${effect.listing}`);
+      }
+      const houseId = houseOf(listing.payload);
+      const house = houseId ? world.houses[houseId] : undefined;
+      if (!house) throw new LeakError(`listing ${effect.listing} names no house`);
+      if (listing.qty < 1) throw new LeakError(`listing ${listing.id} is already let`);
+      const tenant = world.people[effect.tenant];
+      if (!tenant || !tenant.alive) {
+        throw new LeakError(`no living person ${effect.tenant}`);
+      }
+      let next = payAcrossHolders(world, effect.tenant, listing.seller, listing.price);
+      if (tenant.dwelling && tenant.dwelling !== house.id) {
+        const left = next.houses[tenant.dwelling];
+        if (left && left.occupant === tenant.id) {
+          next = {
+            ...next,
+            houses: { ...next.houses, [left.id]: { ...left, occupant: null } },
+          };
+        }
+      }
+      if (house.occupant && house.occupant !== tenant.id) {
+        const prev = next.people[house.occupant];
+        if (prev && prev.dwelling === house.id) {
+          next = {
+            ...next,
+            people: {
+              ...next.people,
+              [prev.id]: { ...prev, dwelling: null },
+            },
+          };
+        }
+      }
+      const current = next.people[tenant.id];
+      return {
+        world: {
+          ...next,
+          people: {
+            ...next.people,
+            [tenant.id]: { ...current, dwelling: house.id },
+          },
+          houses: {
+            ...next.houses,
+            [house.id]: { ...next.houses[house.id], occupant: tenant.id },
+          },
+          listings: next.listings.map((l) =>
+            l.id === listing.id ? { ...l, qty: l.qty - 1 } : l
+          ),
+        },
+        lines: pair(month, "rent", effect.tenant, listing.seller, listing.price),
+      };
+    }
+    case "vacate": {
+      const house = world.houses[effect.house];
+      if (!house) throw new LeakError(`no house ${effect.house}`);
+      return { world: clearDwelling(world, house.id), lines: [] };
+    }
+    case "pinHealth": {
+      const person = world.people[effect.person];
+      if (!person) throw new LeakError(`no person ${effect.person}`);
+      if (!person.alive) throw new LeakError(`${effect.person} is already dead`);
+      if (effect.cause === "homeless") {
+        return {
+          world: {
+            ...world,
+            people: {
+              ...world.people,
+              [person.id]: { ...person, health: 0 },
+            },
+          },
+          lines: [],
+        };
+      }
+      if (person.diseases.includes(effect.disease)) {
+        throw new LeakError(`${effect.person} already has ${effect.disease}`);
+      }
+      return {
+        world: {
+          ...world,
+          people: {
+            ...world.people,
+            [person.id]: {
+              ...person,
+              health: 0,
+              diseases: [...person.diseases, effect.disease],
+            },
+          },
+        },
+        lines: [],
+      };
+    }
+    case "assign": {
+      const person = world.people[effect.person];
+      if (!person) throw new LeakError(`no person ${effect.person}`);
+      if (!person.alive) throw new LeakError(`${effect.person} is already dead`);
+      return {
+        world: {
+          ...world,
+          people: {
+            ...world.people,
+            [person.id]: { ...person, assignment: effect.specialty },
+          },
+        },
+        lines: [],
+      };
+    }
+    case "cure": {
+      const person = world.people[effect.person];
+      if (!person) throw new LeakError(`no person ${effect.person}`);
+      if (!effect.granted) return { world, lines: [] };
+      const at = person.diseases.indexOf(effect.disease);
+      if (at < 0) throw new LeakError(`${effect.person} does not have ${effect.disease}`);
+      const diseases = person.diseases.slice();
+      diseases.splice(at, 1);
+      return {
+        world: {
+          ...world,
+          people: {
+            ...world.people,
+            [person.id]: { ...person, diseases },
+          },
+        },
+        lines: [],
+      };
+    }
+    case "levelUp": {
+      const person = world.people[effect.person];
+      if (!person) throw new LeakError(`no person ${effect.person}`);
+      if (!effect.granted) return { world, lines: [] };
+      return {
+        world: {
+          ...world,
+          people: {
+            ...world.people,
+            [person.id]: {
+              ...person,
+              education: {
+                ...person.education,
+                [effect.career]: person.education[effect.career] + 1,
+              },
+            },
+          },
+        },
+        lines: [],
+      };
+    }
+    case "buyCure": {
+      if (effect.qty === 0) return { world, lines: [] };
+      if (effect.qty !== params.cureSize) {
+        throw new LeakError(`cure qty ${effect.qty} is not ${params.cureSize}`);
+      }
+      const person = world.people[effect.person];
+      if (!person) throw new LeakError(`no person ${effect.person}`);
+      const listing = world.listings.find((row) => row.id === effect.listing);
+      if (!listing || listing.kind !== "cure") {
+        throw new LeakError(`no cure listing ${effect.listing}`);
+      }
+      const disease = diseaseOf(listing.payload);
+      if (!disease) throw new LeakError(`${effect.listing} names no disease`);
+      const at = person.diseases.indexOf(disease);
+      if (at < 0) throw new LeakError(`${effect.person} does not have ${disease}`);
+      if (listing.qty < effect.qty) {
+        throw new LeakError(`listing ${effect.listing} is short of ${effect.qty}`);
+      }
+      const cost = listing.price * effect.qty;
+      const diseases = person.diseases.slice();
+      diseases.splice(at, 1);
+      const paid = payAcrossHolders(world, effect.person, listing.seller, cost);
+      const buyer = paid.people[effect.person];
+      return {
+        world: {
+          ...paid,
+          people: {
+            ...paid.people,
+            [effect.person]: { ...buyer, diseases },
+          },
+          listings: paid.listings.map((row) =>
+            row.id === listing.id ? { ...row, qty: row.qty - effect.qty } : row
+          ),
+        },
+        lines: pair(month, "privateCure", effect.person, listing.seller, cost),
+      };
+    }
+    case "buyTuition": {
+      if (effect.qty === 0) return { world, lines: [] };
+      if (effect.qty !== params.unitsPerLevel) {
+        throw new LeakError(`tuition qty ${effect.qty} is not ${params.unitsPerLevel}`);
+      }
+      const person = world.people[effect.person];
+      if (!person) throw new LeakError(`no person ${effect.person}`);
+      const listing = world.listings.find((row) => row.id === effect.listing);
+      if (!listing) throw new LeakError(`no tuition listing ${effect.listing}`);
+      const career = tuitionCareer(listing.payload);
+      if (!career) throw new LeakError(`${effect.listing} names no career`);
+      if (listing.qty < effect.qty) {
+        throw new LeakError(`listing ${effect.listing} is short of ${effect.qty}`);
+      }
+      const cost = listing.price * effect.qty;
+      const paid = payAcrossHolders(world, effect.person, listing.seller, cost);
+      const buyer = paid.people[effect.person];
+      return {
+        world: {
+          ...paid,
+          people: {
+            ...paid.people,
+            [effect.person]: {
+              ...buyer,
+              education: {
+                ...buyer.education,
+                [career]: buyer.education[career] + 1,
+              },
+            },
+          },
+          listings: paid.listings.map((row) =>
+            row.id === listing.id ? { ...row, qty: row.qty - effect.qty } : row
+          ),
+        },
+        lines: pair(month, "tuition", effect.person, listing.seller, cost),
+      };
+    }
+    case "archiveJobs": {
+      return {
+        world: {
+          ...world,
+          jobArchive: {
+            year: Math.floor(month / 12),
+            listings: effect.listings.map((row) => ({ ...row })),
+          },
+        },
+        lines: [],
       };
     }
     case "death": {

@@ -4,12 +4,21 @@
 
 import { formatBooks } from "./world/books.ts";
 import { householdLeaf } from "./bridge/household.ts";
+import { healthSceneOrders, runHealth } from "./bridge/health.ts";
+import { runSpecialDay, specialSceneOrders } from "./bridge/special.ts";
 import { runStaple } from "./bridge/staple.ts";
 import { commitEngine } from "./cli/econ.ts";
 import { planOpening } from "./world/fold.ts";
 import { postGoodGate } from "./world/gates.ts";
 import { remainderDraws } from "./world/purses.ts";
-import { marketSeed, monthSeed, purseSeed, storySeed } from "./world/seed.ts";
+import {
+  healthSeed,
+  marketSeed,
+  monthSeed,
+  purseSeed,
+  specialSeed,
+  storySeed,
+} from "./world/seed.ts";
 import { loadWorld, saveWorld } from "./world/store.ts";
 import {
   type Clock,
@@ -118,6 +127,61 @@ async function runScripted(ids: IdSource, clock: Clock): Promise<void> {
   p(`listing qty ${shelf.listings[0]?.qty ?? 0}  shop staple ${
     shelf.firms.shop.inventory.staple ?? 0
   }`);
+
+  p("\n— special day: shares, the dividend, a house lottery, a job, a machine, the rent —\n");
+  const specialCtx = openRig("demo-out/special", specialSeed(), ids, clock);
+  await runSpecialDay(specialCtx, specialSceneOrders());
+  printScene(specialCtx);
+  const day = loadWorld(specialCtx.worldPath);
+  const units = (holder: string) =>
+    Object.values(day.shares).filter((share) => share.holder === holder)
+      .reduce((n, share) => n + share.units, 0);
+  const machine = Object.values(day.machines)[0];
+  p(
+    `shares  ada ${units("ada")}  ben ${units("ben")}  ` +
+      `outstanding ${day.banks.a.sharesOutstanding}  equity ${day.banks.a.equity}`,
+  );
+  p(
+    `houses  h-cleo ${day.houses["h-cleo"].owner}  ` +
+      `h-ben occupant ${day.houses["h-ben"].occupant ?? "none"}  ` +
+      `h-ada ${day.houses["h-ada"].occupant}`,
+  );
+  p(
+    `jobs  ben salary ${day.people.ben.job?.salary ?? "none"}  ` +
+      `cleo ${day.people.cleo.job ? "seated" : "rationed"}`,
+  );
+  p(
+    `machine  generation ${machine?.generation ?? "none"}  ` +
+      `owner ${machine?.owner ?? "none"}  builder ${machine?.builder ?? "none"}`,
+  );
+  p(
+    `dwellings  ada ${day.people.ada.dwelling}  ben ${day.people.ben.dwelling}  ` +
+      `cleo ${day.people.cleo.dwelling ?? "none"}  cleo health ${day.people.cleo.health}`,
+  );
+
+  p("\n— health: a disease, the public lottery, a private cure, a level —\n");
+  const healthCtx = openRig("demo-out/health", healthSeed(), ids, clock);
+  await runHealth(healthCtx, healthSceneOrders());
+  printScene(healthCtx);
+  const health = loadWorld(healthCtx.worldPath);
+  p(
+    `diseases  ben ${health.people.ben.diseases.join(",") || "none"}  ` +
+      `cleo ${health.people.cleo.diseases.join(",") || "none"}  ` +
+      `ben health ${health.people.ben.health}  cleo health ${health.people.cleo.health}`,
+  );
+  p(
+    `levels  ada engineer ${health.people.ada.education.engineer}  ` +
+      `cleo bureaucrat ${health.people.cleo.education.bureaucrat}`,
+  );
+  p(
+    `mix  doc ${health.people.doc.assignment ?? "none"}  ` +
+      `teach ${health.people.teach.assignment ?? "none"}`,
+  );
+  p(
+    `purses  cleo ${health.people.cleo.deposits.a}  ` +
+      `hospital ${health.firms["priv-hosp"].deposits.a}  ` +
+      `university ${health.firms["priv-uni"].deposits.a}`,
+  );
 }
 
 function fillText(act: Act | undefined): string {

@@ -22,6 +22,8 @@ import type { BooksReport } from "../world/books.ts";
 import { payGate } from "../world/gates.ts";
 import { planOpening } from "../world/fold.ts";
 import { remainderDraws } from "../world/purses.ts";
+import { runDiscretionary, runDisease, runPublic } from "./health.ts";
+import { runSpecialDay } from "./special.ts";
 import { runStaple } from "./staple.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
 import { assertFlowIdentity, assertInvariant, openingNfa } from "../world/world.ts";
@@ -69,6 +71,12 @@ export async function runMonth(ctx: HarnessCtx): Promise<MonthResult> {
     ctx.ids,
     ctx.clock,
   );
+
+  // Disease, with the opening. monthSeed's two draws miss, so the journal
+  // stays pay then lendBank. The stream still advances.
+  runDisease(ctx);
+  // The mix and the bids are handed in. The month prefix hands nothing.
+  await runPublic(ctx, {});
 
   // 2. Both households owe a reply. The shapes are fixed before either runs.
   //    Ada's loan is inside the LTV. Ben's is not. The gate refuses Ben.
@@ -119,6 +127,17 @@ export async function runMonth(ctx: HarnessCtx): Promise<MonthResult> {
   // step has not yet swept out of the firm. No listing, or no bid: nothing
   // is asked, and monthSeed's journal stays pay then lendBank.
   await runStaple(ctx, []);
+
+  // The special day, after staple and before discretionary buys. monthSeed is
+  // month 0, so the day is open, and it writes nothing: no listings, no bids,
+  // and the bank's equity is negative so the dividend does not pay. Share
+  // trades are not repeated later in the month. Mine trades and debt are not
+  // this call.
+  await runSpecialDay(ctx, {});
+
+  // Private cures and tuition. After staple and after the special day's rent.
+  // The month prefix hands nothing, so this writes nothing.
+  await runDiscretionary(ctx, {});
 
   // After the capital step. Remainder of a solvent firm goes to its owner.
   // A folded firm is skipped.

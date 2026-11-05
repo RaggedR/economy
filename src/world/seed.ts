@@ -3,6 +3,7 @@
 
 import type { Bank, Career, Deposits, Firm, Person, World } from "./types.ts";
 import { CAREERS } from "./types.ts";
+import { assertInvariant } from "./world.ts";
 
 function education(): Record<Career, number> {
   return Object.fromEntries(CAREERS.map((c) => [c, 0])) as Record<Career, number>;
@@ -22,6 +23,7 @@ export function makePerson(
     happiness: 0,
     education: education(),
     diseases: [],
+    assignment: null,
     starvation: 0,
     job: null,
     dwelling: null,
@@ -167,6 +169,58 @@ export function marketSeed(): World {
   return world;
 }
 
+/** One special day. Ada holds both shares of bank a and lives in h-ada. Ben holds
+ *  the loan against h-ben, works the shop, and has no dwelling yet. Cleo lives
+ *  in h-ben and owns h-cleo vacant. Bank a has earned 40 of interest. The shop's
+ *  deposit at b is already on that bank's sheet. */
+export function specialSeed(): World {
+  const ada = makePerson("ada", 0, 0);
+  const ben = makePerson("ben", 60, 0);
+  const cleo = makePerson("cleo", 0, 40);
+  ada.dwelling = "h-ada";
+  ada.health = 1;
+  ben.health = 0;
+  ben.job = { firm: "shop", career: "retail", salary: 8 };
+  cleo.health = 5;
+  cleo.dwelling = "h-ben";
+  const world = shell(
+    { ada, ben, cleo },
+    60,
+    40,
+  );
+  world.banks.a.equity = 40;
+  world.banks.a.loansOutstanding = 100;
+  world.banks.a.sharesOutstanding = 2;
+  world.shares = { s: { id: "s", bank: "a", holder: "ada", units: 2 } };
+  world.loans = {
+    L: {
+      kind: "bank",
+      id: "L",
+      bank: "a",
+      borrower: "ben",
+      principal: 100,
+      installment: 10,
+      months: 10,
+      collateral: "h-ben",
+    },
+  };
+  world.houses = {
+    "h-ada": { id: "h-ada", units: 10, owner: "ada", occupant: "ada", lien: null },
+    "h-ben": { id: "h-ben", units: 10, owner: "ben", occupant: "cleo", lien: "L" },
+    "h-cleo": { id: "h-cleo", units: 10, owner: "cleo", occupant: null, lien: null },
+  };
+  world.firms = {
+    shop: firmShell("shop", "ada", { a: 0, b: 20 }),
+    mill: firmShell("mill", "ben", { a: 0, b: 0 }, "tech"),
+  };
+  world.people.ada.firm = "shop";
+  world.people.ben.firm = "mill";
+  world.banks.b.depositLiability -= 20;
+  world.banks.b.equity -= 20;
+  assertInvariant(world);
+  return world;
+}
+
 /** The month scene: a wage, one loan the gate accepts, one it refuses. */
 export function monthSeed(): World {
   const world = shell(
@@ -198,5 +252,53 @@ export function monthSeed(): World {
     s1: { id: "s1", bank: "a", holder: "ada", units: 100 },
   };
   world.banks.a.sharesOutstanding = 100;
+  return world;
+}
+
+/** Disease, the two mixes, and a private cure. Seed 8 strikes Ben with d2 and
+ *  misses the other four. Cleo already holds d0. Doc and teach are public staff. */
+export function healthSeed(): World {
+  const ada = makePerson("ada", 100, 0);
+  ada.dwelling = "h-ada";
+  ada.health = 5;
+  const ben = makePerson("ben", 0, 0);
+  ben.health = 5;
+  const cleo = makePerson("cleo", 80, 0);
+  cleo.dwelling = "h-cleo";
+  cleo.health = 0;
+  cleo.diseases = ["d0"];
+  const doc = makePerson("doc", 0, 0);
+  doc.dwelling = "h-doc";
+  doc.health = 4;
+  doc.job = { firm: "pub-hosp", career: "doctor", salary: 1 };
+  const teach = makePerson("teach", 0, 0);
+  teach.dwelling = "h-teach";
+  teach.health = 4;
+  teach.job = { firm: "pub-uni", career: "teacher", salary: 1 };
+  const world = shell(
+    { ada, ben, cleo, doc, teach },
+    180,
+    0,
+  );
+  world.rng = { seed: 8, stream: 0 };
+  world.houses = {
+    "h-ada": { id: "h-ada", units: 10, owner: "ada", occupant: "ada", lien: null },
+    "h-cleo": { id: "h-cleo", units: 10, owner: "cleo", occupant: "cleo", lien: null },
+    "h-doc": { id: "h-doc", units: 10, owner: "doc", occupant: "doc", lien: null },
+    "h-teach": {
+      id: "h-teach",
+      units: 10,
+      owner: "teach",
+      occupant: "teach",
+      lien: null,
+    },
+  };
+  world.firms = {
+    "pub-hosp": firmShell("pub-hosp", "gov", { a: 0, b: 0 }, "publicHospital"),
+    "pub-uni": firmShell("pub-uni", "gov", { a: 0, b: 0 }, "publicUniversity"),
+    "priv-hosp": firmShell("priv-hosp", "ada", { a: 0, b: 0 }, "privateHospital"),
+    "priv-uni": firmShell("priv-uni", "ada", { a: 0, b: 0 }, "privateUniversity"),
+  };
+  assertInvariant(world);
   return world;
 }

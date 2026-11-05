@@ -20,7 +20,9 @@ books() {
   cat demo-out/story/world.json demo-out/story/journal.jsonl demo-out/story/intent-log.jsonl \
       demo-out/month/world.json demo-out/month/journal.jsonl demo-out/month/intent-log.jsonl \
       demo-out/purse/world.json demo-out/purse/journal.jsonl demo-out/purse/intent-log.jsonl \
-      demo-out/market/world.json demo-out/market/journal.jsonl demo-out/market/intent-log.jsonl
+      demo-out/market/world.json demo-out/market/journal.jsonl demo-out/market/intent-log.jsonl \
+      demo-out/special/world.json demo-out/special/journal.jsonl demo-out/special/intent-log.jsonl \
+      demo-out/health/world.json demo-out/health/journal.jsonl demo-out/health/intent-log.jsonl
 }
 
 OUT1="$(deno run --allow-read --allow-write src/demo.ts)"; A="$(books)"

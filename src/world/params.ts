@@ -30,4 +30,22 @@ export const params = {
    * lives here so a reducer does not invent it.
    */
   distressDiscountPercent: 20,
+  /**
+   * Disease strikes when `nextUint % diseaseOutOf < diseaseHit`. No spec
+   * default. The second draw, only on a hit, picks one of the five uniformly.
+   * One in five is the placeholder, so the fraction is named rather than written
+   * into the draw.
+   */
+  diseaseHit: 1,
+  diseaseOutOf: 5,
+  /** Doctor units in one cure. Fixed by the interface. All or nothing. */
+  cureSize: 10,
+  /** Teacher-time for one level-up. No spec default. */
+  unitsPerLevel: 10,
+  /**
+   * Public awards one assigned doctor or teacher yields this month.
+   * output(c, g) is the tech summand, not this market. One award is one cure
+   * or one level, not a partial fill.
+   */
+  awardsPerAssignee: 1,
 };

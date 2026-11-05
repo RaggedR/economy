@@ -5,7 +5,17 @@
 import type { Fib } from "../lib/algebra.ts";
 import type { BooksReport } from "../world/books.ts";
 import type { ReconcileReport } from "../log/reconcile.ts";
-import type { BankId, FlowRow, Good, Id, Money, Qty, Rate } from "../world/types.ts";
+import type {
+  BankId,
+  Career,
+  Disease,
+  FlowRow,
+  Good,
+  Id,
+  Money,
+  Qty,
+  Rate,
+} from "../world/types.ts";
 
 export type Act =
   | { tag: "done"; correlationId: string }
@@ -44,10 +54,127 @@ export type BuyShape = {
   lots: { listing: Id; qty: Qty }[];
 };
 
+/** The listing, the won flag, and the seated flag are the plan. The interface
+ *  shapes do not carry them. The leaf commits the plan and does not clear. */
+export type SellShareShape = {
+  tag: "sellShare";
+  bank: BankId;
+  qty: Qty;
+  price: Money;
+  reason: string;
+};
+
+export type BuyShareShape = {
+  tag: "buyShare";
+  bank: BankId;
+  qty: Qty;
+  limit: Money;
+  reason: string;
+  lots: { listing: Id; qty: Qty }[];
+};
+
+export type OfferHouseShape = {
+  tag: "offerHouse";
+  house: Id;
+  ask: Money;
+  reason: string;
+};
+
+export type BuyHouseShape = {
+  tag: "buyHouse";
+  house: Id;
+  listing: Id;
+  won: boolean;
+  reason: string;
+};
+
+export type OccupyShape = {
+  tag: "occupyOrLet";
+  house: Id;
+  mode: "occupy" | "let";
+  reason: string;
+};
+
+export type KeepJobShape = {
+  tag: "keepJob";
+  listing: Id;
+  seated: boolean;
+  reason: string;
+};
+
+export type ApplyJobShape = {
+  tag: "applyJob";
+  listing: Id;
+  seated: boolean;
+  reason: string;
+};
+
+export type PostRentShape = {
+  tag: "postRent";
+  house: Id;
+  rent: Money;
+  reason: string;
+};
+
+export type ApplyRentShape = {
+  tag: "applyRent";
+  house: Id;
+  listing: Id;
+  pay: boolean;
+  reason: string;
+};
+
+/** `granted` is the lottery. It is not an interface field. */
+export type BidCureShape = {
+  tag: "bidCure";
+  disease: Disease;
+  granted: boolean;
+  reason: string;
+};
+
+export type BidEducationShape = {
+  tag: "bidEducation";
+  career: Career;
+  granted: boolean;
+  reason: string;
+};
+
+/** `listing` and `qty` are the plan. The interface shape names the provider. */
+export type BuyCureShape = {
+  tag: "buyCure";
+  disease: Disease;
+  provider: Id;
+  listing: Id;
+  qty: Qty;
+  reason: string;
+};
+
+export type BuyTuitionShape = {
+  tag: "buyTuition";
+  career: Career;
+  provider: Id;
+  listing: Id;
+  qty: Qty;
+  reason: string;
+};
+
 export type HouseholdC =
   | Fib<LoanShape, Act>
   | Fib<PayShape, Act>
   | Fib<BuyShape, Act>
+  | Fib<SellShareShape, Act>
+  | Fib<BuyShareShape, Act>
+  | Fib<OfferHouseShape, Act>
+  | Fib<BuyHouseShape, Act>
+  | Fib<OccupyShape, Act>
+  | Fib<KeepJobShape, Act>
+  | Fib<ApplyJobShape, Act>
+  | Fib<PostRentShape, Act>
+  | Fib<ApplyRentShape, Act>
+  | Fib<BidCureShape, Act>
+  | Fib<BidEducationShape, Act>
+  | Fib<BuyCureShape, Act>
+  | Fib<BuyTuitionShape, Act>
   | Fib<{ tag: "readBooks" }, Read<BooksReport>>;
 
 export type BankC =

@@ -24,6 +24,12 @@ export type MachineType = Career;
 export type Material = "common" | "advanced";
 export type Disease = "d0" | "d1" | "d2" | "d3" | "d4";
 
+export const DISEASES: readonly Disease[] = ["d0", "d1", "d2", "d3", "d4"];
+
+export function isDisease(id: string): id is Disease {
+  return (DISEASES as readonly string[]).includes(id);
+}
+
 export type FirmKind =
   | "supermarket"
   | "luxury"
@@ -86,6 +92,8 @@ export type Person = {
   happiness: number;
   education: Record<Career, number>;
   diseases: Disease[];
+  /** What a public doctor or teacher is pointed at this month. Null is unassigned. */
+  assignment: Disease | Career | null;
   starvation: number;
   job: { firm: Id; career: Career; salary: Money } | null;
   dwelling: Id | null;
@@ -203,11 +211,24 @@ export type MachineOffer = {
   generation: number;
 };
 
+/** Which bank's shares a listing sells. The interface payload union has no
+ *  share. A holder can own both banks, so the bank is not implied by the seller. */
+export type ShareOffer = { bank: BankId };
+
+/** The house a sale or a tenancy names. An owner can hold more than one. */
+export type HouseOffer = { house: Id };
+
 /** The interface's payload union has no good. A good listing carries this and
- *  nothing else, so staple is not stored in a spare field of another offer. */
+ *  nothing else, so staple is not stored in a spare field of another offer.
+ *  Tuition names a career. The other goods do not. */
 export type Good = "staple" | "luxuryFood" | "nightclub" | "tuition";
 
-export type GoodOffer = { good: Good };
+export type GoodOffer =
+  | { good: "staple" | "luxuryFood" | "nightclub" }
+  | { good: "tuition"; career: Career };
+
+/** A private-hospital cure. Ten units of one disease. A cure is not a Good. */
+export type CureOffer = { disease: Disease };
 
 export function goodOf(payload: Listing["payload"]): Good | null {
   if (!payload || !("good" in payload)) return null;
@@ -233,11 +254,41 @@ export type Listing = {
     | "rent"
     | "mine"
     | "debt"
-    | "share";
+    | "share"
+    | "cure";
   price: Money;
   qty: Qty;
-  payload: JobPayload | DebtOffer | MachineOffer | GoodOffer | null;
+  payload:
+    | JobPayload
+    | DebtOffer
+    | MachineOffer
+    | GoodOffer
+    | ShareOffer
+    | HouseOffer
+    | CureOffer
+    | null;
 };
+
+export function shareBank(payload: Listing["payload"]): BankId | null {
+  if (!payload || !("bank" in payload)) return null;
+  return payload.bank === "a" || payload.bank === "b" ? payload.bank : null;
+}
+
+export function houseOf(payload: Listing["payload"]): Id | null {
+  if (!payload || !("house" in payload)) return null;
+  return typeof payload.house === "string" ? payload.house : null;
+}
+
+export function diseaseOf(payload: Listing["payload"]): Disease | null {
+  if (!payload || !("disease" in payload)) return null;
+  return isDisease(payload.disease) ? payload.disease : null;
+}
+
+export function tuitionCareer(payload: Listing["payload"]): Career | null {
+  if (!payload || !("good" in payload) || payload.good !== "tuition") return null;
+  if (!("career" in payload)) return null;
+  return (CAREERS as readonly string[]).includes(payload.career) ? payload.career : null;
+}
 
 export type StandingOrder = {
   firm: Id;
@@ -298,6 +349,21 @@ export type Effect =
   | { tag: "writeOff"; instrument: Id }
   | { tag: "post"; listing: Listing }
   | { tag: "fill"; listing: Id; buyer: Id; qty: Qty }
+  | { tag: "tradeShare"; listing: Id; buyer: Id; qty: Qty }
+  | { tag: "transferHouse"; listing: Id; buyer: Id; qty: Qty }
+  | { tag: "occupy"; house: Id; mode: "occupy" | "let" }
+  | { tag: "hire"; listing: Id; person: Id; seated: boolean; keep: boolean }
+  | { tag: "deliverMachine"; listing: Id; firm: Id; qty: Qty }
+  | { tag: "rent"; listing: Id; tenant: Id; pay: boolean }
+  | { tag: "vacate"; house: Id }
+  | { tag: "pinHealth"; person: Id; cause: "homeless" }
+  | { tag: "pinHealth"; person: Id; cause: "disease"; disease: Disease }
+  | { tag: "assign"; person: Id; specialty: Disease | Career | null }
+  | { tag: "cure"; person: Id; disease: Disease; granted: boolean }
+  | { tag: "levelUp"; person: Id; career: Career; granted: boolean }
+  | { tag: "buyCure"; person: Id; listing: Id; qty: Qty }
+  | { tag: "buyTuition"; person: Id; listing: Id; qty: Qty }
+  | { tag: "archiveJobs"; listings: JobArchive["listings"] }
   | { tag: "death"; person: Id }
   | { tag: "depositMine"; mine: Id; bank: BankId; shares: Qty }
   | { tag: "seize"; loan: Id }

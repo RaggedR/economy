@@ -46,6 +46,9 @@ Deno.test("the month prefix balances, refuses in the intent log, and replays", a
       l.kind === "bank" ? l.borrower : ""
     );
     assertEquals(borrowers, ["ada"]);
+    assertEquals(world.people.ada.diseases, []);
+    assertEquals(world.people.ben.diseases, []);
+    assertEquals(world.rng, { seed: 1, stream: 2 });
 
     const journal = fileJournal(a.ctx.journalPath).all();
     assertEquals(journal.map((e) => e.source), ["engine", "agent"]);

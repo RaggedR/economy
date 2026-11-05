@@ -9,26 +9,52 @@
 
 import { booksReport } from "../world/books.ts";
 import {
+  assignGate,
+  buyCureGate,
+  buyTuitionGate,
+  cureGate,
+  deliverMachineGate,
   depositMineGate,
   dividendGate,
   drawGate,
   fillGate,
   type GateResult,
+  hireGate,
   issuePrivateGate,
   lendGate,
+  levelUpGate,
+  occupyGate,
   payGate,
+  postCureGate,
+  postHouseGate,
+  postJobGate,
+  postMachineGate,
   postMaterialGate,
+  postRentGate,
+  postShareGate,
+  postTuitionGate,
+  rentGate,
   repayGate,
   requestLoanGate,
   seizeGate,
   sellCapitalGate,
   setLoanRateGate,
+  tradeShareGate,
+  transferHouseGate,
   transferPrivateGate,
   writeOffGate,
 } from "../world/gates.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
-import type { BankId, Effect, FlowRow, Id, Qty } from "../world/types.ts";
-import { FLOW_ROWS, isBankId } from "../world/types.ts";
+import type {
+  BankId,
+  Career,
+  Disease,
+  Effect,
+  FlowRow,
+  Id,
+  Qty,
+} from "../world/types.ts";
+import { CAREERS, DISEASES, FLOW_ROWS, isBankId } from "../world/types.ts";
 import { applyEffect } from "../world/world.ts";
 import { fileJournal, type JournalEntry } from "../log/journal.ts";
 import { fileIntentLog } from "../log/intentlog.ts";
@@ -86,6 +112,26 @@ function parseBank(s: string | undefined): BankId {
   return s;
 }
 
+function parseCareer(s: string | undefined): Career {
+  if (!s || !(CAREERS as readonly string[]).includes(s)) {
+    throw new Refusal(`unknown career ${s ?? ""}`);
+  }
+  return s as Career;
+}
+
+function parseDisease(s: string | undefined): Disease {
+  if (!s || !(DISEASES as readonly string[]).includes(s)) {
+    throw new Refusal(`unknown disease ${s ?? ""}`);
+  }
+  return s as Disease;
+}
+
+function parseBool(s: string | undefined, name: string): boolean {
+  if (s === "true") return true;
+  if (s === "false") return false;
+  throw new Refusal(`${name} must be true or false`);
+}
+
 function parseLots(s: string | undefined): { listing: Id; qty: Qty }[] {
   if (s === undefined || s.trim() === "") return [{ listing: "", qty: 0 }];
   return s.split(",").map((part) => {
@@ -126,6 +172,60 @@ export function commitEngine(
   };
   fileJournal(paths.journal).append(entry);
   return { correlationId };
+}
+
+/** Several effects, one correlation id, one market answer. `filled` is what
+ *  the intent log compares with `asked`. */
+function commitMany(
+  worldPath: string,
+  journalPath: string,
+  ids: IdSource,
+  clock: Clock,
+  flags: Parsed["flags"],
+  effects: Effect[],
+  asked: number,
+): {
+  committed: true;
+  correlationId: string;
+  effect: string;
+  filled: number;
+  asked: number;
+} {
+  const current = loadWorld(worldPath);
+  let cursor = current;
+  for (const effect of effects) cursor = applyEffect(cursor, effect);
+  saveWorld(worldPath, cursor);
+  const correlationId = str(flags, "corr") ?? ids.next();
+  for (const effect of effects) {
+    const entry: JournalEntry = {
+      correlationId,
+      month: current.month,
+      ts: clock.now(),
+      effect: effect.tag,
+      source: "agent",
+    };
+    fileJournal(journalPath).append(entry);
+  }
+  const filled = effects.reduce((sum, effect) => {
+    if (
+      effect.tag === "tradeShare" || effect.tag === "transferHouse" ||
+      effect.tag === "deliverMachine"
+    ) return sum + effect.qty;
+    if (effect.tag === "hire") return sum + (effect.seated ? 1 : 0);
+    if (effect.tag === "rent") return sum + (effect.pay ? 1 : 0);
+    if (effect.tag === "cure" || effect.tag === "levelUp") {
+      return sum + (effect.granted ? 1 : 0);
+    }
+    if (effect.tag === "buyCure" || effect.tag === "buyTuition") return sum + effect.qty;
+    return sum;
+  }, 0);
+  return {
+    committed: true,
+    correlationId,
+    effect: effects[0]?.tag ?? "tradeShare",
+    filled,
+    asked,
+  };
 }
 
 function run(argv: string[], ids: IdSource, clock: Clock): { value: unknown } {
@@ -390,6 +490,305 @@ function run(argv: string[], ids: IdSource, clock: Clock): { value: unknown } {
       );
       return {
         value: { committed: true, correlationId, effect: "fill", filled, asked },
+      };
+    }
+    case "sell-share": {
+      const current = world();
+      return {
+        value: commit(
+          "sell-share",
+          postShareGate(
+            current,
+            str(flags, "seller") ?? "",
+            parseBank(str(flags, "bank")),
+            parseIntStrict(str(flags, "price"), "price"),
+            parseIntStrict(str(flags, "qty"), "qty"),
+          ),
+        ),
+      };
+    }
+    case "buy-share": {
+      reqReason(flags, "buy-share");
+      const buyer = str(flags, "buyer") ?? "";
+      const asked = parseIntStrict(str(flags, "asked") ?? "0", "asked");
+      if (asked < 0) throw new Refusal("asked must be a non-negative integer");
+      const lots = parseLots(str(flags, "lots"));
+      let cursor = world();
+      const effects: Effect[] = [];
+      for (const lot of lots) {
+        const gate = tradeShareGate(cursor, lot.listing, buyer, lot.qty);
+        if (!gate.ok) throw new Refusal(gate.reason);
+        effects.push(gate.effect);
+        cursor = applyEffect(cursor, gate.effect);
+      }
+      return {
+        value: commitMany(worldPath, journalPath, ids, clock, flags, effects, asked),
+      };
+    }
+    case "offer-house": {
+      const current = world();
+      return {
+        value: commit(
+          "offer-house",
+          postHouseGate(
+            current,
+            str(flags, "owner") ?? "",
+            str(flags, "house") ?? "",
+            parseIntStrict(str(flags, "ask"), "ask"),
+          ),
+        ),
+      };
+    }
+    case "buy-house": {
+      reqReason(flags, "buy-house");
+      const buyer = str(flags, "buyer") ?? "";
+      const qty = parseIntStrict(str(flags, "qty"), "qty");
+      const gate = transferHouseGate(world(), str(flags, "listing") ?? "", buyer, qty);
+      if (!gate.ok) throw new Refusal(gate.reason);
+      const asked = 1;
+      return {
+        value: commitMany(
+          worldPath,
+          journalPath,
+          ids,
+          clock,
+          flags,
+          [gate.effect],
+          asked,
+        ),
+      };
+    }
+    case "occupy": {
+      const mode = str(flags, "mode");
+      if (mode !== "occupy" && mode !== "let") {
+        throw new Refusal("mode must be occupy or let");
+      }
+      return {
+        value: commit(
+          "occupy",
+          occupyGate(world(), str(flags, "owner") ?? "", str(flags, "house") ?? "", mode),
+        ),
+      };
+    }
+    case "post-job": {
+      return {
+        value: commit(
+          "post-job",
+          postJobGate(
+            world(),
+            str(flags, "firm") ?? "",
+            parseCareer(str(flags, "career")),
+            parseIntStrict(str(flags, "generation"), "generation"),
+            parseIntStrict(str(flags, "salary"), "salary"),
+            parseIntStrict(str(flags, "slots"), "slots"),
+          ),
+        ),
+      };
+    }
+    case "hire": {
+      reqReason(flags, "hire");
+      const seated = parseBool(str(flags, "seated"), "seated");
+      const keep = parseBool(str(flags, "keep"), "keep");
+      const gate = hireGate(
+        world(),
+        str(flags, "listing") ?? "",
+        str(flags, "person") ?? "",
+        seated,
+        keep,
+      );
+      if (!gate.ok) throw new Refusal(gate.reason);
+      const asked = 1;
+      return {
+        value: commitMany(
+          worldPath,
+          journalPath,
+          ids,
+          clock,
+          flags,
+          [gate.effect],
+          asked,
+        ),
+      };
+    }
+    case "post-machine": {
+      return {
+        value: commit(
+          "post-machine",
+          postMachineGate(
+            world(),
+            str(flags, "firm") ?? "",
+            parseCareer(str(flags, "type")),
+            parseIntStrict(str(flags, "generation"), "generation"),
+            parseIntStrict(str(flags, "price"), "price"),
+            parseIntStrict(str(flags, "qty"), "qty"),
+          ),
+        ),
+      };
+    }
+    case "order-machine": {
+      reqReason(flags, "order-machine");
+      const asked = parseIntStrict(str(flags, "asked") ?? "0", "asked");
+      const qty = parseIntStrict(str(flags, "qty"), "qty");
+      const gate = deliverMachineGate(
+        world(),
+        str(flags, "listing") ?? "",
+        str(flags, "firm") ?? "",
+        qty,
+      );
+      if (!gate.ok) throw new Refusal(gate.reason);
+      return {
+        value: commitMany(
+          worldPath,
+          journalPath,
+          ids,
+          clock,
+          flags,
+          [gate.effect],
+          asked,
+        ),
+      };
+    }
+    case "post-rent": {
+      return {
+        value: commit(
+          "post-rent",
+          postRentGate(
+            world(),
+            str(flags, "owner") ?? "",
+            str(flags, "house") ?? "",
+            parseIntStrict(str(flags, "rent"), "rent"),
+          ),
+        ),
+      };
+    }
+    case "apply-rent": {
+      reqReason(flags, "apply-rent");
+      const pay = parseBool(str(flags, "pay"), "pay");
+      const gate = rentGate(
+        world(),
+        str(flags, "listing") ?? "",
+        str(flags, "tenant") ?? "",
+        pay,
+      );
+      if (!gate.ok) throw new Refusal(gate.reason);
+      return {
+        value: commitMany(worldPath, journalPath, ids, clock, flags, [gate.effect], 1),
+      };
+    }
+    case "assign": {
+      const person = str(flags, "person") ?? "";
+      const disease = str(flags, "disease");
+      const career = str(flags, "career");
+      if (disease && career) throw new Refusal("assign names a disease or a career");
+      const specialty = disease
+        ? parseDisease(disease)
+        : career
+        ? parseCareer(career)
+        : null;
+      return { value: commit("assign", assignGate(world(), person, specialty)) };
+    }
+    case "bid-cure": {
+      reqReason(flags, "bid-cure");
+      const granted = parseBool(str(flags, "granted"), "granted");
+      const gate = cureGate(
+        world(),
+        str(flags, "person") ?? "",
+        parseDisease(str(flags, "disease")),
+        granted,
+      );
+      if (!gate.ok) throw new Refusal(gate.reason);
+      return {
+        value: commitMany(worldPath, journalPath, ids, clock, flags, [gate.effect], 1),
+      };
+    }
+    case "bid-education": {
+      reqReason(flags, "bid-education");
+      const granted = parseBool(str(flags, "granted"), "granted");
+      const gate = levelUpGate(
+        world(),
+        str(flags, "person") ?? "",
+        parseCareer(str(flags, "career")),
+        granted,
+      );
+      if (!gate.ok) throw new Refusal(gate.reason);
+      return {
+        value: commitMany(worldPath, journalPath, ids, clock, flags, [gate.effect], 1),
+      };
+    }
+    case "post-cure": {
+      return {
+        value: commit(
+          "post-cure",
+          postCureGate(
+            world(),
+            str(flags, "firm") ?? "",
+            parseDisease(str(flags, "disease")),
+            parseIntStrict(str(flags, "price"), "price"),
+            parseIntStrict(str(flags, "qty"), "qty"),
+          ),
+        ),
+      };
+    }
+    case "post-tuition": {
+      return {
+        value: commit(
+          "post-tuition",
+          postTuitionGate(
+            world(),
+            str(flags, "firm") ?? "",
+            parseCareer(str(flags, "career")),
+            parseIntStrict(str(flags, "price"), "price"),
+            parseIntStrict(str(flags, "qty"), "qty"),
+          ),
+        ),
+      };
+    }
+    case "buy-cure": {
+      reqReason(flags, "buy-cure");
+      const qty = parseIntStrict(str(flags, "qty"), "qty");
+      const asked = parseIntStrict(str(flags, "asked") ?? String(qty), "asked");
+      const gate = buyCureGate(
+        world(),
+        str(flags, "person") ?? "",
+        parseDisease(str(flags, "disease")),
+        str(flags, "listing") ?? "",
+        qty,
+      );
+      if (!gate.ok) throw new Refusal(gate.reason);
+      return {
+        value: commitMany(
+          worldPath,
+          journalPath,
+          ids,
+          clock,
+          flags,
+          [gate.effect],
+          asked,
+        ),
+      };
+    }
+    case "buy-tuition": {
+      reqReason(flags, "buy-tuition");
+      const qty = parseIntStrict(str(flags, "qty"), "qty");
+      const asked = parseIntStrict(str(flags, "asked") ?? String(qty), "asked");
+      const gate = buyTuitionGate(
+        world(),
+        str(flags, "person") ?? "",
+        parseCareer(str(flags, "career")),
+        str(flags, "listing") ?? "",
+        qty,
+      );
+      if (!gate.ok) throw new Refusal(gate.reason);
+      return {
+        value: commitMany(
+          worldPath,
+          journalPath,
+          ids,
+          clock,
+          flags,
+          [gate.effect],
+          asked,
+        ),
       };
     }
 
