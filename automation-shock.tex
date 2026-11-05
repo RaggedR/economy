@@ -1,0 +1,923 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{amssymb}
+
+\setlist{nosep, leftmargin=1.5em, topsep=2pt}
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.6em}{0.5em}
+\titlespacing*{\subsection}{0pt}{1.1em}{0.3em}
+
+\hypersetup{
+  pdftitle={An automation shock in a small economy},
+  pdfauthor={Robin Langer},
+  pdfborder={0 0 0}
+}
+
+\newcommand{\hyp}[1]{\medskip\noindent\textit{Hypothesis.}\ #1\medskip}
+
+\title{\textbf{An automation shock in a small economy}}
+\author{Robin Langer}
+\date{5 November 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+I propose to build a small, closed, agent-based economy in which a single
+real phenomenon --- the \emph{automation of production} --- is the only
+internal shock, and to ask whether that one change is sufficient to produce
+the two movements Irving Fisher separated: a fall in the price of goods, and
+a debt-deflation in the price of assets. The economy is stock-flow consistent:
+every unit of money is somebody's asset and somebody else's liability, created
+only when a bank lends and destroyed only when a loan is repaid. Every agent
+is boundedly rational and sees only its own books; no agent forecasts the
+macro-economy. The claims of interest --- deflation, structural unemployment,
+a debt-deflation spiral, and a grim mortality-driven floor beneath it --- are
+things the model should be \emph{able to produce from micro-rules}, never
+assumptions written into its equations. This document specifies the entities,
+the markets, the money, and the clock in enough detail to implement; every
+design question is resolved, and what remains is numeric calibration.
+\end{abstract}
+
+{\small\tableofcontents}
+
+%====================================================================
+\section{The proposal}
+%====================================================================
+
+\subsection{The question}
+
+The nightmare scenario is simple to state and hard to produce honestly. A
+generation of machines arrives that makes \emph{more} goods with \emph{fewer}
+workers. Supply rises and employment falls at the same instant; the newly
+unemployed stop spending, so demand falls while supply climbs. Prices fall ---
+deflation. But debt is a fixed sum of money, and the interest on it must still
+be paid out of a money supply that is now shrinking. Repaying yesterday's loan
+in today's dearer money raises the \emph{real} burden of every debt, which
+pushes households and firms to sell assets to raise cash, which deflates asset
+prices further: a debt-deflation spiral. High real rates kill the incentive to
+start or grow a business, investment collapses, and the economy settles into a
+depressed state.
+
+The model's job is not to assert this story but to see whether it
+\emph{emerges}. I will give agents local rules --- buy food before anything
+else, lower your price when goods go unsold, refuse a loan that looks unsafe
+--- and watch whether the macro-pattern above appears without anyone being told
+to produce it. The single internal cause is one declining parameter: the number
+of operators a machine of a given type and generation requires.
+
+\subsection{Modelling stance}
+
+Three commitments shape every later choice.
+
+\textit{Agent-based.} The unit of the model is the individual household or
+firm, acting on its own accounts, the prices posted so far, the calendar, and
+its own recent sales. There is no representative agent and no central
+auctioneer.
+
+\textit{Stock-flow consistent (SFC).} Money is not a free-floating price level.
+It is created when a bank writes a new deposit against collateral, and
+destroyed when that loan is repaid; a loan between two individuals only
+\emph{moves} money that already exists. Every flow leaves an accounting trace
+in two places. A slump shrinks the money supply because banks make fewer new
+loans, not because anyone's cash is annihilated.
+
+\textit{Boundedly rational; the market prices risk, not the agent.} No agent
+holds a model of the economy or forecasts the cycle. A bank is a mechanical
+secured lender that checks a collateral ratio. A private lender applies a local
+heuristic to a borrower's disclosed accounts (does current revenue cover the
+monthly payment with margin?). Risk is priced by the \emph{market} --- a
+borrower posts terms, lenders accept or decline, and a firm that cannot place
+its debt re-posts at a higher rate next turn --- never by a forecast inside
+anyone's head.
+
+%====================================================================
+\section{The world}
+%====================================================================
+
+\subsection{Entities and resources}
+
+The economy contains four kinds of agent: \textbf{individuals} (households, some
+of whom are also entrepreneurs or mine owners), one or two \textbf{banks}, and
+a \textbf{government}. Everything they trade falls into a small set of
+resource classes.
+
+\begin{itemize}
+  \item \textbf{Consumer goods and services}, bought to raise welfare: staple
+  food (survival), luxury food and private healthcare (general health),
+  nightclubs and bigger housing (happiness), and private tuition (education).
+  \item \textbf{Real estate} --- houses of various sizes --- which is both a
+  place to live (a requirement, below) and an illiquid asset.
+  \item \textbf{Liquid financial assets}: private debt, government debt, and
+  bank shares. These trade every month.
+  \item \textbf{Managed productive assets}: \emph{mines} (mining land plus its
+  finite stock of raw material) and \emph{businesses} (a bundle of machines and
+  the employees who operate them).
+  \item \textbf{Machines}, which come in distinct \emph{types} and, within a
+  type, successive \emph{generations} (levels). The generation is the
+  automation dial of \S\ref{sec:bijection}.
+  \item \textbf{Raw materials} --- a common and an advanced type --- both
+  consumed to build machines, the advanced one increasingly at higher
+  generations (\S\ref{sec:raw}).
+\end{itemize}
+
+A household's welfare is three stocks --- health, happiness, education --- and
+its survival turns on a fourth necessity, food, bought before anything else.
+Individuals pay no tax; firms do.
+
+\subsection{The agent archetypes}
+
+The same individual can wear several hats; the archetypes below are roles, not
+castes, and the model lets agents move between them.
+
+\begin{itemize}
+  \item \textbf{An ordinary individual} holds a job (or does not), lives in a
+  house it owns or rents, carries welfare stocks, and each month must feed
+  itself before it spends, invests, or saves.
+  \item \textbf{An entrepreneur} is an individual who also owns a business
+  outright --- machines plus employees --- and must meet the firm's
+  obligations (wages, tax, debt service) before taking any profit home.
+  \item \textbf{A tech entrepreneur} runs the special business that builds
+  \emph{machines} out of raw materials, employing engineers. This is the only
+  agent that can introduce a new machine generation, so it is the supply valve
+  of automation itself.
+  \item \textbf{A mine owner} holds mining land, must post a selling price and
+  quantity for its raw material each month, may sell the mine on the secondary
+  market, and may deposit it into a bank in exchange for bank shares.
+  \item \textbf{The indigenous population} are the initial mine owners: at the
+  start they own all mining land and the mines, which makes them the economy's
+  first rentier-financier class (\S\ref{sec:seed}).
+  \item \textbf{The government} taxes sales, employs public doctors, teachers
+  and bureaucrats, runs the public hospital and university, borrows when short,
+  and provides health and education in kind --- but never cash, housing, or
+  food.
+  \item \textbf{The bank} is a mechanical secured lender whose capital base is
+  deposited mining land, who may lend up to a multiple of that base, and who
+  pays its depositor-shareholders a yearly dividend.
+\end{itemize}
+
+%====================================================================
+\section{How a person lives}
+%====================================================================
+
+\subsection{Welfare: health, happiness, education, and the hard zeros}
+\label{sec:welfare}
+
+Each lever of consumption does exactly one thing; there are no cross-effects to
+blur the accounting. The luxury supermarket and the private hospital raise
+\emph{general health}; the nightclub and a bigger house raise \emph{happiness};
+teachers (public or private) raise \emph{education}; the ordinary supermarket
+buys staple food, which is survival rather than welfare. Doctors are a special
+case: they do not raise general health at all --- they \emph{cure diseases}
+(\S\ref{sec:health-market}).
+
+Two couplings turn these tidy stocks into a trap. First, \textbf{happiness caps
+health}: there is a ceiling on how healthy an unhappy agent can be, so even a
+single-minded health-maximiser must buy some happiness to lift the ceiling
+before more medicine or luxury food does anything. Second, there are two
+\textbf{hard-zero} states that pin health at zero and hold it there ---
+\emph{homelessness} and an \emph{uncured disease}. While pinned, no amount of
+luxury food helps; the condition must be resolved first (get housed; or buy the
+specialist cure). And because employers prefer healthier applicants
+(\S\ref{sec:job-market}), an agent at health zero is also unhireable. Job loss
+then lowers income, which costs the agent its housing or its health, which makes
+it harder to be hired --- a micro-level poverty spiral that is the household
+mirror of the macro debt-deflation spiral.
+
+Homelessness itself does not kill; it sends health to zero but the agent lives,
+and public services still reach it, so the trap is escapable. What kills is a
+sustained inability to buy food, under a \textbf{three-turn rule}. An agent that
+cannot afford food does not die at once: it enters starvation, and the engine
+automatically force-sells its \emph{liquid} assets --- cash first, then bank
+shares, debt holdings, and directly-held mine land --- at a below-market distress
+price to feed it. Only after three consecutive foodless turns, once nothing
+liquid remains to burn, does it die. Because houses can be sold only once a year
+(\S\ref{sec:time}) and are not force-sold here, an asset-rich but cash-poor owner
+whose only wealth is an unsellable house still dies this way --- death by
+\emph{illiquidity}, not insolvency (\S\ref{sec:realestate-sale}). The same
+three-turn rule governs a newborn that cannot be fed (\S\ref{sec:birthdeath}).
+
+\subsection{Careers, education levels, and the machine-operator bijection}
+\label{sec:bijection}
+
+Every productive job is the operation of a machine, and machine types stand in
+\textbf{bijection} with worker classes: a bureaucrat runs the admin machine, a
+doctor the medical machine, a teacher the teaching machine, and retail and
+hospitality staff theirs, while an \emph{engineer} runs the meta-machine that
+builds machines. The thing that automates is itself a machine with operators who
+can, in turn, be automated. Mining is the exception: extraction is
+\emph{labour-free}, a mine producing raw material directly from its land and
+finite stock with no operators at all (\S\ref{sec:raw}).
+
+Alongside these productive workers, every business also employs
+\textbf{bureaucrats} who run its admin machine and \emph{support} the productive
+staff in a fixed ratio --- $\beta$ bureaucrats per productive worker, about one
+to one at generation~0 (a hospital with twenty doctors runs twenty bureaucrats).
+Because the admin machine automates like any other, a higher
+generation needs fewer bureaucrats per unit of throughput, so $\beta$ falls: the
+back office sheds workers exactly as the shop floor does.
+
+Education is \textbf{per career}, and within a career it is a \emph{level}. Your
+level in a career decides which \emph{generation} of that career's machine you
+may operate: level~0 runs generation~0, higher levels run higher generations.
+An ``advanced engineer'' is therefore not a separate profession but simply a
+high-level engineer --- the one who can build the next machine generation.
+
+The friction that makes automation bite is that \textbf{switching careers resets
+education to zero}. Your level belongs to one career and does not transfer; a
+bureaucrat displaced by automation who retrains as an engineer starts again at
+level~0. This is what turns automation unemployment \emph{structural} rather
+than merely cyclical: the displaced cannot glide sideways into the jobs that are
+growing. Which career an agent educates toward is its own decision, made by
+looking at last year's job offerings and training toward whatever was most in
+demand --- adaptive, backward-looking expectations rather than a forecast.
+
+\subsection{An ordinary individual's turn}
+\label{sec:individual-turn}
+
+Each month, an individual who is neither an entrepreneur nor a mine owner acts
+in a strict, necessity-first order:
+
+\begin{enumerate}
+  \item \textbf{Get paid.} Collect all income due: wages (if employed), the
+  monthly repayment on any debt it holds, mine-land yield, and --- once a year,
+  as an upfront lump --- rent from any property let out. The government also
+  offers, this turn, a rationed chance at a free public level-up or disease cure
+  (\S\ref{sec:education-market}, \S\ref{sec:health-market}).
+  \item \textbf{Buy food, or starve.} The first act of every turn. An agent that
+  cannot buy food enters starvation; the engine force-sells its liquid assets
+  below market to feed it, and death follows only after three consecutive
+  foodless turns (\S\ref{sec:welfare}).
+  \item \textbf{Buy welfare and education} with what remains --- health,
+  happiness, education, in any amount supply allows, on top of whatever the
+  government provided free.
+  \item \textbf{Invest} with what is still left, in the monthly capital market:
+  mine land and debt (\S\ref{sec:capital-market}). Houses are \emph{not} bought
+  here --- they trade only on the annual real-estate day.
+  \item \textbf{Save} whatever is left as cash.
+\end{enumerate}
+
+This necessity-first ordering is one of three parallel turn-orders --- the
+household's here, the entrepreneur's in \S\ref{sec:entrepreneur-turn}, the
+government's in \S\ref{sec:government} --- all sharing one principle: in a
+downturn each agent is squeezed from the bottom up, and the order decides what
+gets cut first.
+
+%====================================================================
+\section{The markets}
+%====================================================================
+
+\subsection{One protocol, many venues}
+\label{sec:protocol}
+
+Every market in the economy runs the \emph{same} disequilibrium protocol, so no
+market ever clears instantaneously and gluts and shortages are both possible and
+informative. Each turn:
+
+\begin{enumerate}
+  \item \textbf{Sellers post} their prices and quantities first.
+  \item \textbf{Buyers decide} what and how much to buy.
+  \item If demand exceeds supply, the good \textbf{sells out} and a
+  \textbf{random lottery} rations who is served --- rationing by chance, not by
+  willingness to pay.
+  \item Sellers \textbf{reprice from last turn's feedback}: raise what sold out,
+  cut what went unsold, and undercut or match what competitors charged.
+\end{enumerate}
+
+One detail matters for the crash: the protocol must be \textbf{symmetric}. Just
+as oversubscribed demand raises prices, an oversupply of sellers with too few
+buyers must force asking prices \emph{down}. This falling-price branch is the
+asset-collapse channel; without it the debt-deflation spiral cannot run.
+
+\subsection{The consumer market (monthly)}
+
+Food, entertainment, private health, and private education all trade monthly
+under the common protocol: providers advertise, buyers choose, goods can sell
+out and trigger a lottery, and prices adapt. Housing is the one consumer good
+that does \emph{not} trade here --- it has its own annual day
+(\S\ref{sec:realestate-sale}, \S\ref{sec:rental}).
+
+\subsection{The education market: public and private}
+\label{sec:education-market}
+
+Education raises a citizen's level in one chosen career. Teachers are generic
+--- a teacher can teach any subject --- so what is produced is set by which
+subjects the government and universities choose to staff.
+
+\emph{Public} education is a policy lever. Each turn the government picks which
+teacher-types to employ, setting the mix of education produced. Citizens apply
+for the units needed to reach their next level; the government fills this demand
+in a priority order by housing status --- \textbf{homeless first, then renters,
+then owners} --- with a \textbf{lottery} inside each tier, and allocation is
+\textbf{all-or-nothing}: a winner completes a full level-up, a loser gets
+nothing. So free education is real but rationed, and only in the types the
+government chose to produce. \emph{Private} tuition buys the specific career-type
+you want outright, escaping both the mix and the lottery.
+
+Because a career switch resets education (\S\ref{sec:bijection}), the
+government's \emph{mix} choice shapes the future labour force: keep training
+bureaucrats when the economy needs engineers and you mis-train the population
+for obsolete work. Steering the mix toward growing careers is the main public
+tool for absorbing the automation shock.
+
+\subsection{The health market: disease, doctors, public and private}
+\label{sec:health-market}
+
+General health is bought at the luxury supermarket; \emph{disease} is a
+separate, catastrophic state. There are five disease types, and each turn
+disease strikes citizens at random, sending the victim's health to a hard zero
+until cured. A cure requires buying ten units of the \emph{matching} specialist
+doctor (five diseases to five specialties), at a public or private hospital.
+
+Doctor supply flows from the education system --- a generic teacher can train
+any specialty --- and the government chooses its doctor-type mix each turn, just
+as it chooses its teacher mix. Free public healthcare then works identically to
+public education: apply, be served homeless-first with a lottery inside each
+tier, all-or-nothing (the full ten units and a cure, or nothing). Private
+healthcare buys the needed specialist outright. The poor therefore depend on the
+homeless-first lottery while the rich self-insure privately, and a government
+whose doctor mix mismatches the diseases actually circulating leaves some
+citizens curable only by paying.
+
+\subsection{The job market (annual, on the special day)}
+\label{sec:job-market}
+
+Hiring happens once a year, in the job step of the annual special day
+(\S\ref{sec:time}) --- after real-estate sales, before the rental market; between
+special days there is no hiring, though firms may shed workers in any month. The incumbent in a post has
+first preference and may keep it at the same salary without reapplying. An agent
+may also apply elsewhere, provided it meets the job's \textbf{minimum education}
+--- the hard gate on who may apply (\S\ref{sec:bijection}). Among non-incumbent
+applicants the \textbf{healthiest wins}: health is both a welfare stock and a
+hiring edge, which is why a hard-zero agent is unemployable. A worker raises its
+wage only by winning a higher-paid listing on job day, not by continuous
+bargaining. A laid-off worker cannot be rehired until the next annual job day, so
+unemployment can last up to twelve months --- making job loss a durable,
+dangerous event that savings must bridge. Because rent is paid a year upfront, a
+worker can lose its \emph{job} mid-year but not its \emph{house}: unemployment is
+a monthly risk, homelessness only an annual one.
+
+\subsection{The real-estate sale market (annual) and the illiquidity death}
+\label{sec:realestate-sale}
+
+On the special day, real-estate \textbf{sales come early} --- before the job
+market, since a sale needs no job (\S\ref{sec:time}). Houses are bought and sold
+only on this day --- when multiple buyers compete the winner is chosen at random
+--- so real estate is illiquid between days. That illiquidity is precisely what
+enables the asset-rich, cash-poor \textbf{illiquidity death} of
+\S\ref{sec:welfare}: an owner who runs out of cash in month three cannot reach
+its wealth until the special day months away, and houses are not among the liquid
+assets the engine force-sells to feed a starving agent. Mine land and debt, by
+contrast, trade monthly, so a house is the asset that can kill its owner by being
+unsellable. Once sales settle, each owner --- the buyer who just acquired it, or
+the owner who kept it --- \textbf{decides whether to occupy it or rent it out};
+only properties offered for rent enter the rental market, which runs later, after
+the job step.
+
+\subsection{The rental market (annual, last on the special day)}
+\label{sec:rental}
+
+Renting is settled last on the special day --- after sales, the occupy-or-rent
+decision, and the job market (\S\ref{sec:time}), so that applicants' salaries are
+known. The owner re-advertises the rent; the sitting tenant has first preference
+to renew (unless the home was sold out from under them); among other applicants
+the owner prefers the one with the \textbf{highest salary or job title}. Rent is
+paid \textbf{upfront for the whole year}: a tenant who cannot cover a full year
+does not secure the home, and an agent left with no dwelling has its health go to
+zero (homelessness). Because the year is paid in advance, housing is then secure
+until the next special day --- there is no mid-year eviction. Ranking applicants
+by income means that in a downturn landlords swap unemployed tenants for
+higher-paid ones, so the weakest lose housing first.
+
+\subsection{The machine market (annual, on job day)}
+
+Tech companies sell machines to the other businesses, competing on price:
+several producers list prices, businesses place orders, and machines can sell
+out and push producers to raise prices next turn. Each machine carries both a
+purchase cost and a maintenance cost. Machines trade on \emph{job day}, so a firm
+reconfigures its capital and its workforce in the same annual act --- a machine
+purchase is inseparable from the hiring or firing of its operators, and hiring is
+annual.
+
+\subsection{The raw-materials market (monthly)}
+\label{sec:raw}
+
+Mines sell raw material to tech companies every month under the common protocol.
+Extraction is \textbf{labour-free}: a mine employs no one and produces raw
+material directly from its land and finite stock. Each mine advertises a price
+and may sell any quantity up to its remaining stock --- as much as it likes, at
+whatever price it posts; offering less than the stock is withholding, which props
+up the price and slows depletion. A buyer's order may carry a \textbf{roll-over}
+instruction: if it is not filled, the order persists and re-tries at a higher
+price up to a reservation ceiling, so a buyer that truly needs material bids
+itself up within its limit. Raw material is \textbf{finite} --- each mine holds
+a stock sized to it, extraction depletes it, and the total across all mines is
+calibrated to be just enough to reach full automation. As mines deplete and post
+higher prices, input costs to the tech sector drift up: a slow long-run drag.
+
+There are two raw-material types --- a \textbf{common} input and an
+\textbf{advanced} one, one per mine type --- and a machine's \emph{bill of
+materials} depends on its generation: every machine needs the common input in
+bulk plus some of the advanced one, and the advanced requirement rises with each
+generation. The advanced material is therefore a second automation bottleneck
+beside the engineers: as its mine depletes, each new generation costs more of a
+tightening resource --- a material brake on automation that runs alongside the
+labour brake.
+
+\subsection{The capital and secondary market (monthly)}
+\label{sec:capital-market}
+
+Three liquid assets trade monthly under the common protocol --- \textbf{mine
+land}, \textbf{debt}, and \textbf{bank shares} --- and for debt, primary
+issuance and secondary resale are the \emph{same} market. There is only one debt
+instrument (\S\ref{sec:private-debt}); a holder reselling it lists a new price
+and the buyer, who sees the underlying borrower's current disclosure and the
+instrument's remaining payments, accepts or declines. No new claim is created on
+a resale; an existing claim changes hands. Because debt can always be resold, it
+carries a market price that tracks the borrower's health: as a borrower's
+accounts deteriorate, the resale value of its debt falls and holders mark it
+down and dump it \emph{before} any default --- a debt-repricing channel that
+feeds the asset collapse directly, not only through defaults. Participation on
+the lender side is open to any agent with enough savings; it is gated by a
+savings threshold, not by class.
+
+%====================================================================
+\section{Money, finance, and the firm}
+%====================================================================
+
+\subsection{Where money comes from}
+\label{sec:money}
+
+The monetary spine is simple and strict. A \textbf{bank loan creates money}: the
+bank writes a new deposit from nothing against collateral. \textbf{Repayment
+destroys money}: the deposit is extinguished as the loan is paid down. A
+\textbf{private loan creates no money}: it only moves an existing deposit from
+lender to borrower. It follows that a boom, with banks lending freely, expands
+the money supply, and a bust contracts it --- not because anyone's cash is
+burned, but because new lending dries up and existing loans are repaid faster
+than replaced. A default, by contrast, mainly destroys \emph{bank equity}
+rather than money: the deposit the borrower already spent is still in
+circulation. This distinction --- repayment shrinks money, default shrinks the
+bank --- is what makes the deflation and the banking fragility two separate
+stories that happen to coincide in a crash.
+
+\subsection{Mortgages and bank loans}
+\label{sec:mortgage}
+
+To borrow from a bank you must pledge \textbf{collateral}: real estate or mining
+land only, never machines.\footnote{Machines are wrong-way collateral: a firm
+usually fails \emph{because} its machines are an obsolete generation --- worth
+least exactly when seized --- so the bank will not lend against them.} The bank
+advances a lump sum and is repaid in an equal monthly stream to a deadline, the
+total exceeding the lump sum by the interest. The bank is a \textbf{mechanical}
+lender: it lends up to a loan-to-value fraction of the collateral, marks the
+collateral to market each turn, and issues a margin call when the collateral
+falls below the loan. The borrower meets the call by \textbf{selling liquid
+assets first} to pay the loan down; the bank forecloses only if those cannot
+cover the shortfall. It runs no cash-flow forecast and holds no model of the economy; the
+loan-to-value haircut is its entire risk model. Pledged collateral carries a
+\textbf{lien} that blocks sale --- you keep the use and the income of a liened
+house or mine, but you cannot sell it until the loan clears, which sharpens the
+illiquidity risk for an entrepreneur who pledged a home to start a firm.
+
+\subsection{Private debt}
+\label{sec:private-debt}
+
+The direct debt market is where forward-looking credit lives, though even here
+no one forecasts the macro-economy. An issuer exposes all its accounts as a
+structured disclosure; it then offers an instrument --- a lump sum now, a stream
+of equal monthly payments to a deadline, the total exceeding the lump sum by the
+interest --- and a lender reads the disclosure and the offer and either accepts
+or declines, with no negotiation. If no lender bites, the issuer re-posts next
+turn at a higher rate, so a distressed firm visibly ratchets up its offered rate
+to place its debt. Direct-market loans are unsecured and transferable: the
+lender bears the loss if the borrower fails, which is why this debt must carry a
+risk premium over collateralised bank lending.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \textbf{Bank loan} & \textbf{Private loan} \\
+\midrule
+Security      & secured (collateral)       & unsecured \\
+Credit test   & mechanical LTV gate        & lender's heuristic on disclosure \\
+Transferable  & no (held to maturity)      & yes (resold on the capital market) \\
+Effect on money & creates money            & moves existing money \\
+Loss falls on & the bank's equity          & the individual lender \\
+\bottomrule
+\end{tabular}
+\caption{The two credit instruments.}
+\end{table}
+
+\subsection{Government debt}
+
+A government bond is not a special instrument; it is exactly the private-debt
+instrument above, issued by the state. The government exposes its tax revenue
+and its salary obligations, offers a lump sum, rate, and monthly schedule, and
+savers accept or decline. Only the disclosure differs. This is what makes the
+fiscal rescue of \S\ref{sec:government} endogenous: whether the state can borrow
+through a downturn is a verdict of the same market that prices every other debt.
+
+\subsection{Becoming an entrepreneur}
+
+Entrepreneurs are not a fixed caste; an ordinary citizen can enter. The gate is
+\textbf{property}: you must own real estate, because the canonical way to raise
+start-up capital is to pledge that real estate to a bank and take a loan.
+Renters, owning no collateral, cannot enter. Entry is therefore debt-funded ---
+new firms start leveraged --- and the stake is the owner's home: because the
+start-up loan is secured on it, a failure (\S\ref{sec:fold}) seizes the
+\emph{pledged} property, though any other, unmortgaged property is shielded ---
+and the owner keeps a food reserve and recovers at the next real-estate day by
+mortgaging or selling that home.
+Once running, the firm behaves like any business: it buys machines, pays wages
+and taxes, and earns by selling its products. Entry makes the number of firms
+endogenous, and it is the recovery channel after a crash: those who kept their
+property through the bust can pledge it and start again.
+
+\subsection{The tech entrepreneur's decisions}
+
+The tech entrepreneur is the supply valve of automation, facing three nested
+choices each period.
+
+\begin{itemize}
+  \item \textbf{Product strategy.} \emph{Stay} (same machines, same volume),
+  \emph{expand} (more of the same current-generation machines, hiring more
+  regular engineers --- the only growth path before automation ignites, and the
+  one that \emph{adds} jobs), or \emph{upgrade} (hire a scarce advanced engineer
+  to raise one product to a higher, pricier generation --- the sole way a new
+  generation enters the economy).
+  \item \textbf{Process and reinvestment.} When it upgrades its \emph{own}
+  production machines, which lowers the operators each needs, it either
+  \emph{upgrades and fires} (same output, fewer engineers, bank the saving) or
+  \emph{upgrades and redeploys} (keep the engineers, make more product). Which
+  it does turns on \textbf{expected demand}: a firm scales up only if it
+  believes it can sell the extra output, and in a weak, deflationary state it
+  sheds labour instead --- which weakens demand further. The
+  displacement-versus-expansion choice is endogenous, not assumed.
+  \item \textbf{Personal portfolio.} Being also a household, it may instead take
+  profit home --- into happiness, health, mine land (backward integration into
+  its own input supply), rental property, or others' debt.
+\end{itemize}
+
+\subsection{The entrepreneur's turn}
+\label{sec:entrepreneur-turn}
+
+Each turn an entrepreneur acts in order: pay the per-unit sales tax on what the
+firm sold; service the firm's debt; decide whether to borrow (pledging real
+estate or mine land, never machines); and, on job day, decide whether to buy or
+upgrade machines and hire or fire operators. Only what remains after the firm's
+obligations and investment may go to personal saving, outside investment, or
+welfare. The ordering is the point: firm obligations precede firm investment,
+which precedes personal use, so a firm in distress is cut from the bottom up and
+only a genuinely insolvent one fails to meet its wages and debt.
+
+\subsection{Firm fold and the bankruptcy waterfall}
+\label{sec:fold}
+
+When an entrepreneur can no longer meet its obligations, the firm folds. Only its
+\emph{liquid} estate is marshalled --- cash savings, debt receivables, bank
+shares, and directly-held mine land, all liquidated at distress prices ---
+together with any specifically \emph{mortgaged} collateral the bank has a lien
+on. \textbf{Unmortgaged real estate is not seized.} The proceeds meet claims in a
+strict priority waterfall:
+
+\begin{enumerate}
+  \item \textbf{Wages first.} Labour is the senior claim; if the estate cannot
+  pay all workers, random workers are paid until it runs out.
+  \item \textbf{Tax next.} The per-unit sales tax owed on units already sold is
+  paid to the government \emph{before} the bank --- a defaulting firm still owes
+  the state its tax.
+  \item \textbf{The bank}, recovering from the remaining liquid estate and from
+  the mortgaged collateral it holds (sold slightly below market, pushing house
+  prices down) and seized receivables (sold on the debt market). It does not
+  reach unmortgaged property.
+  \item \textbf{Other creditors} --- unsecured direct-market lenders --- take
+  whatever liquid estate remains, usually nothing; the shortfall is their loss,
+  money destroyed, which is why their lending carried a premium.
+\end{enumerate}
+
+\noindent\textbf{Unmortgaged property is shielded, and a food reserve is kept}:
+a small survival reserve of cash --- enough to buy food until the next
+real-estate day --- is carved out before the waterfall, so a fold cannot
+immediately starve the owner. At that real-estate day the ex-entrepreneur
+recovers by either mortgaging its unmortgaged home or selling it, turning the
+shielded illiquid asset into cash. So a folded owner with an unencumbered home
+carries its reserve to the next real-estate day and recovers; it dies the
+three-turn starvation death only if it has neither liquid assets nor unmortgaged
+property. Seizing receivables \emph{before} default closes a
+laundering loophole (borrow, re-lend, fold, keep the receivable nets to zero) and
+is the reason the model needs a secondary debt market at all: the bank must be
+able to liquidate what it seizes.
+
+\subsection{The mine owner's turn}
+
+A mine owner must, each month, post a selling price and a quantity of raw
+material (at most its remaining stock) and sell to tech companies under the
+common protocol. It may also sell the mine itself on the monthly secondary
+market, or \textbf{deposit} it into a bank. Depositing converts the mine into
+\textbf{bank shares}: the physical land becomes the bank's permanent capital and
+can never be withdrawn, but the depositor receives a claim on the bank's yearly
+dividend, which it can sell on the monthly share market for liquidity. Whether
+to keep the mine (liquid, pledgeable, sellable for emergency food money) or
+deposit it (a higher but riskier, locked-up, once-a-year return) is the mine
+owner's central financial choice (\S\ref{sec:bank}).
+
+\subsection{The bank's structure and its scripted decisions}
+\label{sec:bank}
+
+The bank's capital base is \textbf{mining land}, not cash: any agent may deposit
+a mine, the bank operates the deposited mines and sells their raw material, and
+it may lend up to \textbf{ten times} the value of its holdings, creating money
+as it lends. Depositors are the bank's shareholders; the bank pools its income
+--- raw-material sales plus loan interest, minus default losses --- and pays it
+out as a yearly dividend pro rata, on the special day (\S\ref{sec:time}). Because
+shares trade \emph{before} the dividend that day, a share sold then carries the
+dividend to its buyer. This is the one place a dividend exists, companies paying
+none, and it is a strong reason to deposit.
+
+The bank is designed to be \textbf{run-proof from the depositor side} but not
+from the asset side. No depositor can withdraw capital; for liquidity it sells
+its share instead, so there is no classic run. But the bank's equity still
+absorbs loan losses, and because seized collateral (real estate) is illiquid,
+the bank raises cash by \emph{selling its own mine-land capital} on the monthly
+market. In a bust this becomes a \textbf{fire-sale amplifier}: losses force the
+bank to dump mine land, mine-land prices fall, the value of its remaining base
+falls, the ten-times ceiling falls, and lending contracts further --- a
+mine-land debt-deflation that runs alongside the one in houses. The crash bites
+the shareholders through a collapsing dividend, a falling share price, and a
+shrinking base at once; cumulative losses that exhaust equity freeze credit
+entirely.
+
+Two design hazards are worth naming because they constrain the implementation.
+First, a \textbf{self-valuation loophole}: if lending is sized off the posted
+price of \emph{unsold} reserves, and if the deposit incentive drove everyone to
+deposit so the bank \emph{is} the raw-materials market, the bank could post a
+high price to inflate its own lending base and mint money against collateral it
+values itself. The rule that avoids this is to \textbf{mark the deposited mines
+to the independent mine-land market}: value each at its remaining stock times a
+per-unit reference price drawn from recent \emph{independent} mine-land sales of
+that type (adverse selection keeps the best mines independent, so that reference
+market stays liquid and outside the bank's control). The bank posts
+raw-material prices, never mine-land prices, so it cannot value its own
+collateral; the mark reuses the same mark-to-market the bank already applies to
+per-loan collateral, embeds each mine's remaining reserves automatically, and
+falls in a bust as mine-land prices fall --- feeding the amplifier above. (An
+optional floor at trailing realised revenue can be switched on if a mine ever
+marks high while selling nothing.) Second, the
+reason \textbf{not everyone deposits}: the monthly cash of independent sales
+beats a yearly dividend for a household that must eat every month; deposited
+capital is locked and cannot be pledged or sold for emergency food; pro-rata
+pooling dilutes the best mines; and the dividend turns safe mine income into a
+risky profit-share that craters in a crash. These disincentives bite hardest on
+exactly the agents who would otherwise cause a monopoly --- the best mines and
+the cash-poor --- so the equilibrium is a partial, adversely-selected deposit
+base, which both prevents a raw-materials monopoly and preserves a competitive
+price to mark the lending base against.
+
+\subsection{The government's scripted decisions}
+\label{sec:government}
+
+The government is scripted but not omnipotent. Its income is the per-unit sales
+tax plus borrowing; its spending is the wages of public doctors, teachers, and
+bureaucrats, plus interest on its debt. There is \textbf{no cash welfare} ---
+but public health and public education are universal in kind and reach even the
+homeless, and are therefore the poverty trap's circuit-breakers. Each turn it
+acts in order: receive tax; \textbf{pay its workers or fire them} (firing is its
+adjustment valve, and public-sector layoffs feed straight into unemployment);
+pay debt interest; issue new debt to cover any shortfall; and distribute the
+health and education it produced.
+
+Its role in the cycle is an \textbf{endogenous} stabiliser-or-amplifier. It
+would rather borrow than fire, but whether it \emph{can} is decided by the debt
+market: a saver reading falling tax revenue against high salary obligations may
+decline or demand a punishing rate. If savers lend, the state maintains
+employment but now owes interest to the wealthy --- a concentration channel; if
+no one lends tolerably, it is forced into austerity --- the amplifier outcome.
+The timing is cruel, because the same downturn makes the state want to borrow,
+worsens its creditworthiness, and makes savers most reluctant (in deflation,
+holding cash earns a positive real return). And because it too owns machines and
+can automate, the public sector sheds its own workers into a system with no
+welfare to catch them. The free health and education each citizen receives is
+public production divided by population, so austerity, too few public machines,
+or a growing population all shrink it --- weakening the circuit-breaker exactly
+when it is needed most.
+
+%====================================================================
+\section{Population and time}
+%====================================================================
+
+\subsection{Birth, death, and the dark stabiliser}
+\label{sec:birthdeath}
+
+Fertility is \textbf{propertied}: only owners may have children, renters cannot,
+so over generations the population descends increasingly from owners. A newborn
+is endowed at birth with a fixed \textbf{required gift} --- ten units of real
+estate (its own dwelling) plus a required cash gift $G$ --- and starts as a whole
+new household in the lowest job tier, housed and itself fertile once it clears the
+gate below. To have a child, a parent must hold, over and above its own housing,
+at least \textbf{ten spare units} of real estate \emph{and} at least \textbf{$3G$
+in liquid assets}, with another ten units and $3G$ for each further child;
+whether an eligible parent in this voluntary band actually reproduces is governed
+by its optimization strategy. Above a ceiling --- \textbf{one hundred units of
+real estate and $10G$ in liquid assets} --- reproduction is \emph{mandatory}: the
+very rich are forced to have a child, a strong anti-concentration bleed on the
+top. On birth the engine transfers the land and raises the cash gift from the
+parent's liquid assets, force-selling them at aggressively falling prices until
+the gift is funded; and a newborn that cannot be fed is subject to the same
+three-turn starvation rule as any agent. Real-estate accumulation and household
+formation are the same process.
+
+Death routes an estate in one of two sharply different ways. With an heir, the
+firstborn inherits everything undivided --- \textbf{primogeniture}, a
+concentrating force. With \emph{no} heir, the estate splits three ways: real
+estate is broken into ten-unit pieces and handed to random homeless people
+(instantly housing and enfranchising them); \textbf{all cash and liquid assets
+escheat to the government} as revenue --- including the receivables, which the
+state then collects; and the decedent's own debts are \textbf{written off}, so
+its creditors lose. A childless death is thus strongly anti-concentration, the
+opposite of primogeniture, and the distributional fate of the whole model hinges
+on the mix of the two.
+
+This yields the model's most distinctive emergent claim. Because a childless
+death writes off the decedent's debts and de-levers the top, a \textbf{death-wave
+in a crash cancels debt en masse} --- a grim jubilee by mortality. The deeper the
+slump, the more deaths, the more compounding debt simply vanishes, easing the
+burden on survivors and handing houses to the bottom. A second, fiscal stabiliser
+rides alongside: the liquid wealth of the childless dead refills the treasury, so
+a death-wave strengthens the public safety net exactly when demand for it peaks.
+The spiral of \S\ref{sec:individual-turn} is therefore not purely divergent:
+mortality is a genuine negative feedback, a Malthusian damper, and its losers are
+disproportionately the lenders whose loan books the deaths destroy. The model
+should be allowed to reach this floor honestly, through attrition, and must not be
+rescued by any scripted recovery.
+
+\hyp The economy can find a floor beneath a debt-deflation without fiscal
+rescue, through mortality that de-levers it --- a smaller, poorer, de-levered
+population, not a clean recovery.
+
+\subsection{Time and scheduling}
+\label{sec:time}
+
+The clock is twelve months to a year, one turn per month. Most activity ---
+food, welfare and education, the government's distribution, mine-land and debt
+trading --- happens every month. But once a year a single \textbf{special day}
+gathers the slow markets into one strict sequence, each step feeding the next:
+(1)~\textbf{bank shares} trade, before the dividend, so a share sold now carries
+this year's dividend to its buyer; (2)~the \textbf{dividend} is paid to the
+post-trade holders; (3)~\textbf{real estate is bought and sold}, after which each
+owner chooses to occupy or let; (4)~the \textbf{job market} opens (hiring and
+machines); and (5)~the \textbf{rental market} matches tenancies --- last, because
+applicants are ranked by the salary of the job they just did or did not secure.
+House \emph{sales} precede the job market (a sale needs no job), while
+\emph{renting} follows it. This annual rhythm has three consequences the model
+should exhibit:
+
+\begin{itemize}
+  \item An \textbf{annual liquidity cliff}: a full year's rent falls due upfront
+  on one day, so a worker who lost income needs a whole year's buffer to stay
+  housed, and real-estate day becomes a synchronised reckoning where the
+  cash-poor are evicted en masse --- a sharp annual eviction cliff rather than a
+  smooth decline.
+  \item \textbf{Tenant-sorting by income}: because landlords rank applicants by
+  salary, a downturn lets them swap weak tenants for strong, so the weakest lose
+  housing first.
+  \item \textbf{Frequency separation}: housing adjusts annually while labour,
+  goods, and capital adjust monthly, so housing is the slow variable, and the
+  whole cycle may phase-lock to this annual forcing, with crashes clustering at
+  year boundaries.
+\end{itemize}
+
+%====================================================================
+\section{Behaviour, the start, and the experiment}
+%====================================================================
+
+\subsection{Optimization strategies and the social classes}
+
+Each agent carries one objective, drawn at random at birth and not inherited,
+and the dependency chains mean none is truly single-minded. A
+\emph{happiness}-maximiser buys bigger houses (withdrawing them from the rental
+pool) and nightclubs; a \emph{health}-maximiser must also buy happiness, because
+happiness caps health; an \emph{education}-maximiser must also keep health up,
+because hiring is healthiest-wins --- a three-link chain of education needing
+health needing happiness; a \emph{savings}-maximiser hoards cash; an
+\emph{investment}-maximiser buys income assets --- rental property, mine land,
+debt. Note the opposite housing effects: happiness-maximisers withdraw real
+estate from the rental market while investment-maximisers supply it, so the
+strategy mix sets rental supply.
+
+These objectives, crossed with housing and employment status, give a ladder of
+\textbf{social classes} whose fates the model is built to compare: homeless and
+unemployed (health zero, unhireable); renting and unemployed (one real-estate
+day from homelessness); renting and employed (housed but assetless, one shock
+from the trap); owning and employed (secure, accumulating); owning and
+unemployed (asset-rich, perhaps cash-poor, exposed to the illiquidity death);
+the \textbf{rentier} who lives off rents and liquid assets without working; the
+\textbf{entrepreneur} who has risked a home to run a firm; and the
+\textbf{indigenous} mine owner at the top. The through-line is \textbf{why you
+need savings}: with annual hiring, annual rent, and monthly food, only a cash
+buffer carries an agent across a gap in income --- and running it down is the
+common path into the trap.
+
+\subsection{The initial seed}
+\label{sec:seed}
+
+The economy begins stable, fully employed, and at level~0 --- automation has not
+started and must be ignited from within. Every individual starts housed (owning
+or renting), with a job, with health and happiness at ten, and with the starting
+education its job requires. Wealth is drawn at random across three strata ---
+a \emph{bourgeoisie} owning their home plus extra real estate and debt holdings,
+a \emph{middle} owning only their home, and a \emph{poor} owning nothing and so
+renting --- but this is asset ownership, not shelter: nobody is homeless at the
+start. The \textbf{indigenous} own all mining land and the mines, which makes
+them the economy's primary source of capital from turn one; they capitalise the
+bank, collect its dividend, and lend to entrepreneurs, so financial power is
+triply concentrated in them at the outset. Critically, there are regular
+engineers but \textbf{no advanced engineers}: that class starts empty, which is
+what forces ignition.
+
+\subsection{The automation shock, stepped through}
+
+With only level-0 machines and no advanced engineers, the only thing a business
+can do with profit at first is buy more level-0 machines --- so the economy can
+only \emph{expand}, hiring more operators for more output. It cannot yet
+automate. Ignition is endogenous and runs in sequence: an agent acquires enough
+education to become the first \textbf{advanced engineer}; a tech company hires it
+and builds a level-1 machine; businesses buy the new generation, which makes the
+same or more output with fewer operators; and the fire-or-redeploy choice
+finally has something to bite on. The shock's \emph{timing} is therefore set by
+how fast the education system produces that first advanced engineer --- so
+university funding and mix are the master lever on \emph{when} the shock fires,
+not merely on how unequal its aftermath is.
+
+From there the model should, if the micro-rules suffice, generate the whole
+arc without being told to: rising supply and falling employment together;
+unsold goods and falling prices; a shrinking money supply as lending dries up;
+a rising real burden of fixed debts; distressed firms ratcheting up offered
+rates and holders dumping marked-down debt; house and mine-land fire-sales as
+banks and folding firms raise cash; a bank base contracting through its own
+fire-sale; and a government whose rescue succeeds or fails at the verdict of the
+debt market. And beneath it all, the dark stabiliser of
+\S\ref{sec:birthdeath}: a death-wave that cancels debt and hands houses to the
+bottom, letting the system find a floor through attrition.
+
+\hyp A single declining parameter --- operators per machine --- is sufficient,
+under boundedly-rational micro-rules and stock-flow-consistent money, to produce
+both of Fisher's movements: a deflation in goods and a debt-deflation in assets,
+with structural unemployment between them. The experiment is to run the economy
+with this change permitted and again with it forbidden, and compare posted
+prices, new lending, and deaths.
+
+\subsection{Resolved questions, and what remains to calibrate}
+\label{sec:open}
+
+The design is closed; every structural question has a decision. Resolved earlier:
+mining is labour-free with no miner career; the machine market trades on job day;
+mine-land yield is monthly, unbounded up to a mine's finite stock; rent is annual
+and paid upfront, so housing is secure within the year (no mid-year
+homelessness); fertility gates are fixed and the voluntary choice follows the
+agent's objective; the lookahead horizon follows an agent's time-preference; the
+bank's lending base is marked to the independent mine-land market
+(\S\ref{sec:bank}); agents choose their education from last year's job offerings;
+a margin call is met by selling liquid assets before any foreclosure; and the
+glut branch is just the protocol's ``cut the price of what went unsold,'' so the
+symmetric price-fall is already built in. Resolved here:
+
+\begin{itemize}
+  \item \textbf{Secured-first in a childless estate}: the bank seizes its lien'd
+  collateral first; only unsecured owed debts (and any deficiency) are written
+  off, so the homeless receive houses net of any lien and the bank bears a loss
+  only when collateral is worth less than the loan. A sub-ten-unit remainder
+  escheats to the government with the liquid assets; an heir inherits the net
+  estate only, never liabilities.
+  \item \textbf{No forced deleveraging}: the ten-times ceiling governs only
+  \emph{new} lending (it stops as the base shrinks); existing loans are
+  disciplined solely by per-loan margin calls against their own collateral ---
+  the bank never recalls the book en masse.
+  \item \textbf{Labour-force inflow and retraining}: births are the only inflow
+  (no immigration); a career switch resets education to zero and re-education then
+  proceeds at the ordinary rate, so there is no separate retraining speed.
+  \item \textbf{Scripted-agent objectives are deliberately the implementer's
+  choice} --- what the government optimises and an entrepreneur's
+  reinvest-versus-extract split are left open by design, not by omission.
+\end{itemize}
+
+\noindent What remains is \emph{numeric calibration}, not design: the required
+cash gift $G$ (a newborn's endowment, default about a year of subsistence food),
+the bureaucrat support ratio $\beta$ (default one at generation~0), the
+raw-material recipe coefficients per generation, and the usual constants --- the
+loan-to-value haircut, the ten-times leverage cap, the sales-tax rate, the
+fire-sale discount, the total raw-material stock, and the $t_0$ counts. Each is a
+knob to set and sweep, with no design decision outstanding.
+
+\end{document}
