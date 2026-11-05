@@ -17,4 +17,17 @@ export const params = {
   initialRef: { common: 10, advanced: 40 } as Record<Material, Money>,
   /** Integer units the scripted bank moves a rate or an ore price. */
   rateStep: 1,
+  /**
+   * Monthly maintenance for every (career, generation). The t₀ vector is not
+   * in this range, so the price is one named integer rather than a table.
+   */
+  maintenance: 10,
+  /** Money of one staple unit, used to size the fold's food reserve. */
+  stapleReservePrice: 5,
+  /**
+   * Percent knocked off a posted price when starvation sells an asset.
+   * No spec default. Selling shares and mines is a later market; the number
+   * lives here so a reducer does not invent it.
+   */
+  distressDiscountPercent: 20,
 };

@@ -3,8 +3,14 @@
 // not call a model, and it does not stamp a live run with the fixed clock.
 
 import { formatBooks } from "./world/books.ts";
-import { monthSeed, storySeed } from "./world/seed.ts";
-import { loadWorld } from "./world/store.ts";
+import { householdLeaf } from "./bridge/household.ts";
+import { runStaple } from "./bridge/staple.ts";
+import { commitEngine } from "./cli/econ.ts";
+import { planOpening } from "./world/fold.ts";
+import { postGoodGate } from "./world/gates.ts";
+import { remainderDraws } from "./world/purses.ts";
+import { marketSeed, monthSeed, purseSeed, storySeed } from "./world/seed.ts";
+import { loadWorld, saveWorld } from "./world/store.ts";
 import {
   type Clock,
   fixedClock,
@@ -15,6 +21,7 @@ import {
 } from "./log/ids.ts";
 import { fileJournal } from "./log/journal.ts";
 import { reconSummary } from "./log/reconcile.ts";
+import type { Act } from "./bridge/containers.ts";
 import type { HarnessCtx } from "./bridge/harness.ts";
 import { openRig } from "./bridge/rig.ts";
 import { runMonth } from "./bridge/scheduler.ts";
@@ -62,6 +69,62 @@ async function runScripted(ids: IdSource, clock: Clock): Promise<void> {
   p(reconSummary(month.recon));
   for (const b of month.recon.blocked) p(`  blocked  ${b.agent}  ${b.reason}`);
   for (const a of month.recon.alarms) p(`  ALARM  ${a.kind}`);
+
+  p("\n— purses: the firm pays the wage, the household cannot spend the firm's cash —\n");
+  const purseCtx = openRig("demo-out/purse", purseSeed(), ids, clock);
+  const engine = { world: purseCtx.worldPath, journal: purseCtx.journalPath };
+  const opening = planOpening(loadWorld(purseCtx.worldPath));
+  for (const effect of opening.effects) {
+    commitEngine(engine, effect, ids, clock);
+  }
+  saveWorld(purseCtx.worldPath, opening.mark(loadWorld(purseCtx.worldPath)));
+  const cleo = householdLeaf(purseCtx, "cleo");
+  await cleo.run(
+    {
+      tag: "pay",
+      to: "shop",
+      amount: 20,
+      row: "staple",
+      reason: "cleo tries to buy food from an empty purse",
+    },
+    0,
+  );
+  for (const effect of remainderDraws(loadWorld(purseCtx.worldPath))) {
+    commitEngine(engine, effect, ids, clock);
+  }
+  printScene(purseCtx);
+
+  p("\n— staple: the shop posts one lot, then the households buy —\n");
+  const marketCtx = openRig("demo-out/market", marketSeed(), ids, clock);
+  const marketEngine = { world: marketCtx.worldPath, journal: marketCtx.journalPath };
+  const lot = postGoodGate(loadWorld(marketCtx.worldPath), "shop", 10, 1);
+  if (!lot.ok) throw new Error(lot.reason);
+  commitEngine(marketEngine, lot.effect, ids, clock);
+  const bought = await runStaple(marketCtx, [
+    { buyer: "ada", qty: 1, reason: "ada buys staple" },
+    { buyer: "ben", qty: 1, reason: "ben buys staple" },
+    { buyer: "cleo", qty: 1, reason: "cleo buys staple" },
+  ]);
+  printScene(marketCtx);
+  const shelf = loadWorld(marketCtx.worldPath);
+  p(
+    `filled  ada ${fillText(bought[0])}  ben ${fillText(bought[1])}  ` +
+      `cleo ${fillText(bought[2])}`,
+  );
+  p(
+    `starvation  ada ${shelf.people.ada.starvation}  ` +
+      `ben ${shelf.people.ben.starvation}  cleo ${shelf.people.cleo.starvation}`,
+  );
+  p(`listing qty ${shelf.listings[0]?.qty ?? 0}  shop staple ${
+    shelf.firms.shop.inventory.staple ?? 0
+  }`);
+}
+
+function fillText(act: Act | undefined): string {
+  if (!act) return "missing";
+  if (act.tag === "rationed") return `${act.filled} rationed`;
+  if (act.tag === "done") return "filled";
+  return "refused";
 }
 
 export async function start(argv: string[]): Promise<number> {

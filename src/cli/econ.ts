@@ -11,6 +11,8 @@ import { booksReport } from "../world/books.ts";
 import {
   depositMineGate,
   dividendGate,
+  drawGate,
+  fillGate,
   type GateResult,
   issuePrivateGate,
   lendGate,
@@ -25,7 +27,7 @@ import {
   writeOffGate,
 } from "../world/gates.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
-import type { BankId, Effect, FlowRow } from "../world/types.ts";
+import type { BankId, Effect, FlowRow, Id, Qty } from "../world/types.ts";
 import { FLOW_ROWS, isBankId } from "../world/types.ts";
 import { applyEffect } from "../world/world.ts";
 import { fileJournal, type JournalEntry } from "../log/journal.ts";
@@ -82,6 +84,17 @@ function parseIntStrict(s: string | undefined, name: string): number {
 function parseBank(s: string | undefined): BankId {
   if (!s || !isBankId(s)) throw new Refusal("bank must be a or b");
   return s;
+}
+
+function parseLots(s: string | undefined): { listing: Id; qty: Qty }[] {
+  if (s === undefined || s.trim() === "") return [{ listing: "", qty: 0 }];
+  return s.split(",").map((part) => {
+    const cut = part.lastIndexOf(":");
+    if (cut < 0) throw new Refusal("lot must be listing:qty");
+    const qty = parseIntStrict(part.slice(cut + 1), "qty");
+    if (qty < 0) throw new Refusal("qty must be a non-negative integer");
+    return { listing: part.slice(0, cut), qty };
+  });
 }
 
 function parseRow(s: string | undefined): FlowRow {
@@ -330,6 +343,55 @@ function run(argv: string[], ids: IdSource, clock: Clock): { value: unknown } {
       };
     case "seize":
       return { value: commit("seize", seizeGate(world(), str(flags, "loan") ?? "")) };
+    case "draw": {
+      const current = world();
+      return {
+        value: commit(
+          "draw",
+          drawGate(
+            current,
+            str(flags, "firm") ?? "",
+            str(flags, "owner") ?? "",
+            parseIntStrict(str(flags, "amount"), "amount"),
+          ),
+        ),
+      };
+    }
+    case "fill": {
+      reqReason(flags, "fill");
+      const buyer = str(flags, "buyer") ?? "";
+      const asked = parseIntStrict(str(flags, "asked") ?? "0", "asked");
+      if (asked < 0) throw new Refusal("asked must be a non-negative integer");
+      const lots = parseLots(str(flags, "lots"));
+      let cursor = world();
+      const effects: Effect[] = [];
+      for (const lot of lots) {
+        const gate = fillGate(cursor, lot.listing, buyer, lot.qty);
+        if (!gate.ok) throw new Refusal(gate.reason);
+        effects.push(gate.effect);
+        cursor = applyEffect(cursor, gate.effect);
+      }
+      const month = world().month;
+      saveWorld(worldPath, cursor);
+      const correlationId = str(flags, "corr") ?? ids.next();
+      for (const effect of effects) {
+        const entry: JournalEntry = {
+          correlationId,
+          month,
+          ts: clock.now(),
+          effect: effect.tag,
+          source: "agent",
+        };
+        fileJournal(journalPath).append(entry);
+      }
+      const filled = effects.reduce(
+        (s, effect) => s + (effect.tag === "fill" ? effect.qty : 0),
+        0,
+      );
+      return {
+        value: { committed: true, correlationId, effect: "fill", filled, asked },
+      };
+    }
 
     default:
       throw new Refusal(

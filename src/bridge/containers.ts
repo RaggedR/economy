@@ -5,7 +5,7 @@
 import type { Fib } from "../lib/algebra.ts";
 import type { BooksReport } from "../world/books.ts";
 import type { ReconcileReport } from "../log/reconcile.ts";
-import type { BankId, Id, Money, Qty, Rate } from "../world/types.ts";
+import type { BankId, FlowRow, Good, Id, Money, Qty, Rate } from "../world/types.ts";
 
 export type Act =
   | { tag: "done"; correlationId: string }
@@ -25,8 +25,29 @@ export type LoanShape = {
   reason: string;
 };
 
+export type PayShape = {
+  tag: "pay";
+  to: Id;
+  amount: Money;
+  row: FlowRow;
+  reason: string;
+};
+
+/** `lots` is the allocation already computed. It is not part of the interface
+ *  shape. The leaf commits those lots and does not clear the book itself. */
+export type BuyShape = {
+  tag: "buy";
+  good: Good;
+  qty: Qty;
+  seller?: Id;
+  reason: string;
+  lots: { listing: Id; qty: Qty }[];
+};
+
 export type HouseholdC =
   | Fib<LoanShape, Act>
+  | Fib<PayShape, Act>
+  | Fib<BuyShape, Act>
   | Fib<{ tag: "readBooks" }, Read<BooksReport>>;
 
 export type BankC =

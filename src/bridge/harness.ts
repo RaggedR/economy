@@ -31,11 +31,43 @@ export type Registry = {
 };
 
 export type MutationOutcome =
-  | { readonly ok: true; readonly correlationId: string; readonly result: unknown }
+  | {
+    readonly ok: true;
+    readonly correlationId: string;
+    readonly result: unknown;
+    readonly filled?: number;
+    readonly asked?: number;
+  }
   | { readonly ok: false; readonly reason: string };
 
 function monthOf(ctx: HarnessCtx): number {
   return loadWorld(ctx.worldPath).month;
+}
+
+function isRecord(u: unknown): u is Record<string, unknown> {
+  return typeof u === "object" && u !== null;
+}
+
+/** A market commit reports `filled`. Zero and any shortfall are `rationed`.
+ *  A full positive fill, and every non-market commit, is `ok`. */
+function landedStatus(value: unknown): "ok" | "rationed" {
+  if (!isRecord(value)) return "ok";
+  const filled = value.filled;
+  if (typeof filled !== "number" || !Number.isInteger(filled) || filled < 0) return "ok";
+  const asked = value.asked;
+  const ask = typeof asked === "number" && Number.isInteger(asked) ? asked : filled;
+  if (filled === 0 || filled < ask) return "rationed";
+  return "ok";
+}
+
+function filledOf(value: unknown): { filled?: number; asked?: number } {
+  if (!isRecord(value)) return {};
+  const filled = value.filled;
+  const asked = value.asked;
+  return {
+    filled: typeof filled === "number" && Number.isInteger(filled) ? filled : undefined,
+    asked: typeof asked === "number" && Number.isInteger(asked) ? asked : undefined,
+  };
 }
 
 function line(
@@ -99,8 +131,9 @@ export function runMutation(
 
   try {
     const { value } = ctx.econ([...argv, "--reason", reason, "--corr", correlationId]);
-    ctx.intentLog.append(line(ctx, reg.agentId, "ok", callId, correlationId, reason));
-    return { ok: true, correlationId, result: value };
+    const status = landedStatus(value);
+    ctx.intentLog.append(line(ctx, reg.agentId, status, callId, correlationId, reason));
+    return { ok: true, correlationId, result: value, ...filledOf(value) };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (err instanceof Refusal) {

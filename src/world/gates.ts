@@ -4,7 +4,7 @@
 
 import { params } from "./params.ts";
 import type { BankId, Effect, FlowRow, Id, Money, Qty, Rate, World } from "./types.ts";
-import { FLOW_ROWS, isBankId } from "./types.ts";
+import { FLOW_ROWS, goodOf, isBankId } from "./types.ts";
 import { collateralValue, markedMineBase, purseOf } from "./world.ts";
 
 export type GateResult =
@@ -38,6 +38,105 @@ function funds(world: World, id: Id, amount: Money): string | null {
     return `${id} has ${purse.a + purse.b}, short of ${amount}`;
   }
   return null;
+}
+
+export function drawGate(
+  world: World,
+  firmId: Id,
+  owner: Id,
+  amount: Money,
+): GateResult {
+  const bad = posInt(amount, "amount");
+  if (bad) return refused(bad);
+  const firm = world.firms[firmId];
+  if (!firm) return refused(`no firm ${firmId}`);
+  if (firm.folded) return refused(`${firmId} has folded`);
+  if (firm.owner !== owner) return refused(`${owner} does not own ${firmId}`);
+  if (!purseOf(world, owner)) return refused(`no purse for ${owner}`);
+  const short = funds(world, firmId, amount);
+  if (short) return refused(short);
+  return ok({ tag: "draw", firm: firmId, owner, amount });
+}
+
+function listedStaple(world: World, firmId: Id): Qty {
+  let n = 0;
+  for (const listing of world.listings) {
+    if (listing.seller !== firmId || listing.kind !== "good") continue;
+    if (goodOf(listing.payload) !== "staple") continue;
+    n += listing.qty;
+  }
+  return n;
+}
+
+/** Staple only. Other goods are later markets. The listing id is minted in
+ *  applyEffect; the gate's id is empty. */
+export function postGoodGate(
+  world: World,
+  firmId: Id,
+  price: Money,
+  qty: Qty,
+): GateResult {
+  const bad = posInt(price, "price") ?? posInt(qty, "qty");
+  if (bad) return refused(bad);
+  const firm = world.firms[firmId];
+  if (!firm) return refused(`no firm ${firmId}`);
+  if (firm.folded) return refused(`${firmId} has folded`);
+  const stock = firm.inventory.staple ?? 0;
+  const already = listedStaple(world, firmId);
+  if (already + qty > stock) {
+    return refused(`qty ${qty} plus listed ${already} exceeds staple inventory ${stock}`);
+  }
+  return ok({
+    tag: "post",
+    listing: {
+      id: "",
+      seller: firmId,
+      kind: "good",
+      price,
+      qty,
+      payload: { good: "staple" },
+    },
+  });
+}
+
+/** A zero qty is a legal order that bought nothing. It commits, and it does
+ *  not require a listing. */
+export function fillGate(
+  world: World,
+  listingId: Id,
+  buyer: Id,
+  qty: Qty,
+): GateResult {
+  if (!Number.isInteger(qty) || qty < 0) {
+    return refused("qty must be a non-negative integer");
+  }
+  const person = world.people[buyer];
+  if (!person) return refused(`no person ${buyer}`);
+  if (!person.alive) return refused(`${buyer} is dead`);
+  if (qty === 0) return ok({ tag: "fill", listing: listingId, buyer, qty: 0 });
+  const listing = world.listings.find((l) => l.id === listingId);
+  if (!listing) return refused(`no listing ${listingId}`);
+  if (goodOf(listing.payload) !== "staple") return refused(`${listingId} is not staple`);
+  if (listing.qty < qty) {
+    return refused(`listing ${listingId} has ${listing.qty}, short of ${qty}`);
+  }
+  const firm = world.firms[listing.seller];
+  if (!firm) return refused(`no firm ${listing.seller}`);
+  const stock = firm.inventory.staple ?? 0;
+  if (stock < qty) return refused(`staple inventory ${stock} is short of ${qty}`);
+  const cost = listing.price * qty;
+  if (!Number.isSafeInteger(cost)) return refused("price × qty is not a safe integer");
+  const short = funds(world, buyer, cost);
+  if (short) return refused(short);
+  if (!purseOf(world, listing.seller)) return refused(`no purse for ${listing.seller}`);
+  return ok({ tag: "fill", listing: listingId, buyer, qty });
+}
+
+export function deathGate(world: World, personId: Id): GateResult {
+  const person = world.people[personId];
+  if (!person) return refused(`no person ${personId}`);
+  if (!person.alive) return refused(`${personId} is already dead`);
+  return ok({ tag: "death", person: personId });
 }
 
 export function payGate(

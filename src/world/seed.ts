@@ -1,7 +1,7 @@
 // seed.ts — the smallest worlds the milestones drive. Domain ids are fields of
 // the world. Log ids are not.
 
-import type { Bank, Career, Person, World } from "./types.ts";
+import type { Bank, Career, Deposits, Firm, Person, World } from "./types.ts";
 import { CAREERS } from "./types.ts";
 
 function education(): Record<Career, number> {
@@ -88,6 +88,83 @@ export function storySeed(): World {
     1000,
     800,
   );
+}
+
+/** Book a firm's deposits against the bank that owes them. */
+export function placeFirm(world: World, firm: Firm): World {
+  let next: World = { ...world, firms: { ...world.firms, [firm.id]: firm } };
+  for (const bank of ["a", "b"] as const) {
+    const amount = firm.deposits[bank];
+    if (amount === 0) continue;
+    const b = next.banks[bank];
+    next = {
+      ...next,
+      banks: {
+        ...next.banks,
+        [bank]: {
+          ...b,
+          depositLiability: b.depositLiability - amount,
+          equity: b.equity - amount,
+        },
+      },
+    };
+  }
+  const owner = next.people[firm.owner];
+  if (owner && owner.firm === null) {
+    next = {
+      ...next,
+      people: { ...next.people, [owner.id]: { ...owner, firm: firm.id } },
+    };
+  }
+  return next;
+}
+
+export function firmShell(
+  id: string,
+  owner: string,
+  deposits: Deposits,
+  kind: Firm["kind"] = "supermarket",
+): Firm {
+  return {
+    id,
+    kind,
+    owner,
+    deposits,
+    machines: [],
+    inventory: {},
+    salesLastMonth: 0,
+    taxOwed: 0,
+    folded: false,
+  };
+}
+
+/** Ada owns a shop. Ben works there. Cleo holds nothing, so she cannot buy. */
+export function purseSeed(): World {
+  let world = storySeed();
+  world = placeFirm(world, firmShell("shop", "ada", { a: 400, b: 0 }));
+  world.people.ben.job = { firm: "shop", career: "retail", salary: 100 };
+  world.people.cleo = makePerson("cleo", 0, 0);
+  world.houses = {
+    "h-ada": { id: "h-ada", units: 10, owner: "ada", occupant: "ada", lien: null },
+  };
+  world.people.ada.dwelling = "h-ada";
+  return world;
+}
+
+/** Ada owns a shop with one staple on the shelf. Ben can pay. Cleo cannot. */
+export function marketSeed(): World {
+  let world = shell(
+    {
+      ada: makePerson("ada", 50, 0),
+      ben: makePerson("ben", 50, 0),
+      cleo: makePerson("cleo", 0, 0),
+    },
+    100,
+    0,
+  );
+  world = placeFirm(world, firmShell("shop", "ada", { a: 0, b: 0 }));
+  world.firms.shop.inventory = { staple: 1 };
+  return world;
 }
 
 /** The month scene: a wage, one loan the gate accepts, one it refuses. */

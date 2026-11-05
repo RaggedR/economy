@@ -27,7 +27,7 @@ import type {
   Money,
   World,
 } from "./types.ts";
-import { isBankId, otherBank, signedInterbank } from "./types.ts";
+import { goodOf, isBankId, otherBank, signedInterbank } from "./types.ts";
 
 export class LeakError extends Error {
   constructor(message: string) {
@@ -700,6 +700,84 @@ function applyBare(world: World, effect: Effect): { world: World; lines: FlowEnt
           banks: {
             ...world.banks,
             [effect.bank]: { ...bank, loanRate: effect.rate },
+          },
+        },
+        lines: [],
+      };
+    }
+    case "draw": {
+      const firm = world.firms[effect.firm];
+      if (!firm) throw new LeakError(`no firm ${effect.firm}`);
+      if (firm.owner !== effect.owner) {
+        throw new LeakError(`${effect.owner} does not own ${effect.firm}`);
+      }
+      const next = payAcrossHolders(world, effect.firm, effect.owner, effect.amount);
+      return {
+        world: next,
+        lines: pair(month, "profitDraw", effect.firm, effect.owner, effect.amount),
+      };
+    }
+    case "fill": {
+      // A zero fill is a committed outcome. No money moves, and the listing
+      // stays where it is, including when the id is empty because nothing was posted.
+      if (effect.qty === 0) return { world, lines: [] };
+      if (!Number.isInteger(effect.qty) || effect.qty < 0) {
+        throw new LeakError(`fill qty ${effect.qty} is not a non-negative integer`);
+      }
+      const listing = world.listings.find((l) => l.id === effect.listing);
+      if (!listing) throw new LeakError(`no listing ${effect.listing}`);
+      if (goodOf(listing.payload) !== "staple") {
+        throw new LeakError(`${effect.listing} is not staple`);
+      }
+      if (listing.qty < effect.qty) {
+        throw new LeakError(
+          `listing ${effect.listing} has ${listing.qty}, short of ${effect.qty}`,
+        );
+      }
+      const firm = world.firms[listing.seller];
+      if (!firm) throw new LeakError(`no firm ${listing.seller}`);
+      const stock = firm.inventory.staple ?? 0;
+      if (stock < effect.qty) {
+        throw new LeakError(`staple inventory ${stock} is short of ${effect.qty}`);
+      }
+      const cost = listing.price * effect.qty;
+      if (!Number.isSafeInteger(cost) || cost <= 0) {
+        throw new LeakError(`price × qty ${cost} is not a positive safe integer`);
+      }
+      if (!world.people[effect.buyer]) throw new LeakError(`no person ${effect.buyer}`);
+      let next = payAcrossHolders(world, effect.buyer, listing.seller, cost);
+      const seller = next.firms[firm.id];
+      next = {
+        ...next,
+        listings: next.listings.map((l) =>
+          l.id === listing.id ? { ...l, qty: l.qty - effect.qty } : l
+        ),
+        firms: {
+          ...next.firms,
+          [firm.id]: {
+            ...seller,
+            inventory: {
+              ...seller.inventory,
+              staple: (seller.inventory.staple ?? 0) - effect.qty,
+            },
+          },
+        },
+      };
+      return {
+        world: next,
+        lines: pair(month, "staple", effect.buyer, listing.seller, cost),
+      };
+    }
+    case "death": {
+      const person = world.people[effect.person];
+      if (!person) throw new LeakError(`no person ${effect.person}`);
+      if (!person.alive) throw new LeakError(`${effect.person} is already dead`);
+      return {
+        world: {
+          ...world,
+          people: {
+            ...world.people,
+            [person.id]: { ...person, alive: false },
           },
         },
         lines: [],

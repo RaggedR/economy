@@ -104,6 +104,8 @@ export type Firm = {
   inventory: Record<string, Qty>;
   salesLastMonth: Qty;
   taxOwed: Money;
+  /** Set by the fold. A missing builder firm is not how "folded" is written. */
+  folded: boolean;
 };
 
 export type Machine = {
@@ -201,6 +203,24 @@ export type MachineOffer = {
   generation: number;
 };
 
+/** The interface's payload union has no good. A good listing carries this and
+ *  nothing else, so staple is not stored in a spare field of another offer. */
+export type Good = "staple" | "luxuryFood" | "nightclub" | "tuition";
+
+export type GoodOffer = { good: Good };
+
+export function goodOf(payload: Listing["payload"]): Good | null {
+  if (!payload || !("good" in payload)) return null;
+  const good = payload.good;
+  if (
+    good === "staple" || good === "luxuryFood" || good === "nightclub" ||
+    good === "tuition"
+  ) {
+    return good;
+  }
+  return null;
+}
+
 export type Listing = {
   id: Id;
   seller: Id;
@@ -216,7 +236,7 @@ export type Listing = {
     | "share";
   price: Money;
   qty: Qty;
-  payload: JobPayload | DebtOffer | MachineOffer | null;
+  payload: JobPayload | DebtOffer | MachineOffer | GoodOffer | null;
 };
 
 export type StandingOrder = {
@@ -277,10 +297,13 @@ export type Effect =
   | { tag: "transferPrivate"; instrument: Id; from: Id; to: Id; price: Money }
   | { tag: "writeOff"; instrument: Id }
   | { tag: "post"; listing: Listing }
+  | { tag: "fill"; listing: Id; buyer: Id; qty: Qty }
+  | { tag: "death"; person: Id }
   | { tag: "depositMine"; mine: Id; bank: BankId; shares: Qty }
   | { tag: "seize"; loan: Id }
   | { tag: "dividend"; bank: BankId }
-  | { tag: "setLoanRate"; bank: BankId; rate: Rate };
+  | { tag: "setLoanRate"; bank: BankId; rate: Rate }
+  | { tag: "draw"; firm: Id; owner: Id; amount: Money };
 
 export const FLOW_ROWS: readonly FlowRow[] = [
   "wages",

@@ -20,7 +20,10 @@ import { fileJournal } from "../log/journal.ts";
 import type { ReconcileReport } from "../log/reconcile.ts";
 import type { BooksReport } from "../world/books.ts";
 import { payGate } from "../world/gates.ts";
-import { loadWorld } from "../world/store.ts";
+import { planOpening } from "../world/fold.ts";
+import { remainderDraws } from "../world/purses.ts";
+import { runStaple } from "./staple.ts";
+import { loadWorld, saveWorld } from "../world/store.ts";
 import { assertFlowIdentity, assertInvariant, openingNfa } from "../world/world.ts";
 import { auditorLeaf } from "./auditor.ts";
 import type { Act } from "./containers.ts";
@@ -36,8 +39,26 @@ export type MonthResult = {
   recon: ReconcileReport;
 };
 
+function commitOpening(ctx: HarnessCtx): void {
+  const plan = planOpening(loadWorld(ctx.worldPath));
+  for (const effect of plan.effects) {
+    commitEngine(
+      { world: ctx.worldPath, journal: ctx.journalPath },
+      effect,
+      ctx.ids,
+      ctx.clock,
+    );
+  }
+  saveWorld(ctx.worldPath, plan.mark(loadWorld(ctx.worldPath)));
+}
+
 export async function runMonth(ctx: HarnessCtx): Promise<MonthResult> {
   const opening = openingNfa(loadWorld(ctx.worldPath));
+
+  // Opening obligations come out of the firm purse, before any leaf borrows.
+  // A firm that cannot meet them folds here. A later loan does not reach back.
+  // monthSeed has no firm, so this writes nothing.
+  commitOpening(ctx);
 
   // 1. Engine: one contractual wage. Journal source "engine". No intent record.
   const funded = payGate(loadWorld(ctx.worldPath), "gov", "ada", WAGE, "wages");
@@ -93,6 +114,22 @@ export async function runMonth(ctx: HarnessCtx): Promise<MonthResult> {
   const benLoans = loans.filter((l) => l.kind === "bank" && l.borrower === "ben");
   if (adaLoans.length !== 1) throw new Error(`ada's loan was not committed once`);
   if (benLoans.length !== 0) throw new Error("a refused loan was applied");
+
+  // Staple, after loans and before draws. Food is not bought with cash this
+  // step has not yet swept out of the firm. No listing, or no bid: nothing
+  // is asked, and monthSeed's journal stays pay then lendBank.
+  await runStaple(ctx, []);
+
+  // After the capital step. Remainder of a solvent firm goes to its owner.
+  // A folded firm is skipped.
+  for (const effect of remainderDraws(loadWorld(ctx.worldPath))) {
+    commitEngine(
+      { world: ctx.worldPath, journal: ctx.journalPath },
+      effect,
+      ctx.ids,
+      ctx.clock,
+    );
+  }
 
   // 4. Auditor: invariant and reconcile. Two asks, not a tensor.
   const auditor = auditorLeaf(ctx);

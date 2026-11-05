@@ -18,7 +18,9 @@ deno test --allow-read --allow-write
 echo "== determinism: two demo runs must be byte-identical =="
 books() {
   cat demo-out/story/world.json demo-out/story/journal.jsonl demo-out/story/intent-log.jsonl \
-      demo-out/month/world.json demo-out/month/journal.jsonl demo-out/month/intent-log.jsonl
+      demo-out/month/world.json demo-out/month/journal.jsonl demo-out/month/intent-log.jsonl \
+      demo-out/purse/world.json demo-out/purse/journal.jsonl demo-out/purse/intent-log.jsonl \
+      demo-out/market/world.json demo-out/market/journal.jsonl demo-out/market/intent-log.jsonl
 }
 
 OUT1="$(deno run --allow-read --allow-write src/demo.ts)"; A="$(books)"
