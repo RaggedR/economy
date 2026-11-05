@@ -15,6 +15,8 @@ export function auditorLeaf(ctx: HarnessCtx): Runner<AuditorC> {
     invariant: decodeRead(decodeBooks),
     reconcile: decodeRead(decodeReconcile),
   };
+  // The auditor stays on the books. A model does not get to say the rows
+  // sum to zero, so this leaf does not read ctx.brain.
   return leafLocal(
     "auditor",
     (shape) => {

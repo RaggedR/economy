@@ -4,6 +4,7 @@
 // rate it was handed. It does not compute another one.
 
 import { type Decoders, leafLocal, type Runner } from "../lib/algebra.ts";
+import { liveAnswer } from "./live.ts";
 import type { BankId } from "../world/types.ts";
 import { type Act, type BankC, decodeAct } from "./containers.ts";
 import {
@@ -39,54 +40,55 @@ export function bankLeaf(ctx: HarnessCtx, bank: BankId): Runner<BankC> {
   };
   return leafLocal(
     agentId,
-    (shape) => {
-      if (shape.tag === "postLoanRate") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "post-rate",
-          ["post-rate", "--bank", shape.bank, "--rate", String(shape.rate)],
-          { bank: shape.bank },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "postMaterial") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "post-material",
-          [
+    (shape) =>
+      liveAnswer(ctx, agentId, shape, (shape) => {
+        if (shape.tag === "postLoanRate") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "post-rate",
+            ["post-rate", "--bank", shape.bank, "--rate", String(shape.rate)],
+            { bank: shape.bank },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "postMaterial") {
+          return asAct(runMutation(
+            ctx,
+            reg,
             "post-material",
+            [
+              "post-material",
+              "--bank",
+              shape.bank,
+              "--mine",
+              shape.mine,
+              "--price",
+              String(shape.price),
+              "--max-units",
+              String(shape.maxUnits),
+            ],
+            { bank: shape.bank, mine: shape.mine },
+            shape.reason,
+          ));
+        }
+        return asAct(runMutation(
+          ctx,
+          reg,
+          "sell-capital",
+          [
+            "sell-capital",
             "--bank",
             shape.bank,
             "--mine",
             shape.mine,
-            "--price",
-            String(shape.price),
-            "--max-units",
-            String(shape.maxUnits),
+            "--ask",
+            String(shape.ask),
           ],
           { bank: shape.bank, mine: shape.mine },
           shape.reason,
         ));
-      }
-      return asAct(runMutation(
-        ctx,
-        reg,
-        "sell-capital",
-        [
-          "sell-capital",
-          "--bank",
-          shape.bank,
-          "--mine",
-          shape.mine,
-          "--ask",
-          String(shape.ask),
-        ],
-        { bank: shape.bank, mine: shape.mine },
-        shape.reason,
-      ));
-    },
+      }),
     decoders,
   );
 }

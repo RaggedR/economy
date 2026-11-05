@@ -5,6 +5,7 @@
 
 import type { Fib } from "../lib/algebra.ts";
 import { type Decoders, leafLocal, type Runner } from "../lib/algebra.ts";
+import { liveAnswer } from "./live.ts";
 import { type Act, decodeAct } from "./containers.ts";
 import type { HarnessCtx } from "./harness.ts";
 import { type MutationOutcome, type Registry, runMutation } from "./harness.ts";
@@ -39,16 +40,17 @@ export function techLeaf(ctx: HarnessCtx, firm: Id): Runner<TechC> {
     },
   };
   const decoders: Decoders<TechC> = { strategy: decodeAct };
-  return leafLocal(agentId, (shape) => {
-    return asAct(runMutation(
-      ctx,
-      reg,
-      "strategy",
-      ["strategy", "--firm", firm, "--mode", shape.mode],
-      { firm },
-      shape.reason,
-    ));
-  }, decoders);
+  return leafLocal(agentId, (shape) =>
+    liveAnswer(ctx, agentId, shape, (shape) => {
+      return asAct(runMutation(
+        ctx,
+        reg,
+        "strategy",
+        ["strategy", "--firm", firm, "--mode", shape.mode],
+        { firm },
+        shape.reason,
+      ));
+    }), decoders);
 }
 
 export type TechOrder = {

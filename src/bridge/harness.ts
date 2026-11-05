@@ -9,8 +9,10 @@
 
 import type { Clock, IdSource } from "../log/ids.ts";
 import type { IntentLog, IntentRecord, IntentStatus } from "../log/intentlog.ts";
+import type { Brain } from "../model/brain.ts";
 import { loadWorld } from "../world/store.ts";
 import { Refusal } from "../cli/refusal.ts";
+import type { Act } from "./containers.ts";
 
 export type ConRun = (argv: string[]) => { value: unknown };
 
@@ -22,6 +24,9 @@ export type HarnessCtx = {
   readonly journalPath: string;
   readonly intentPath: string;
   readonly econ: ConRun;
+  /** Set only on --live. Absent on a scripted run, so those bytes do not move.
+   *  Not a field of World. */
+  readonly brain?: Brain;
 };
 
 export type Registry = {
@@ -87,6 +92,13 @@ function line(
     status,
     reason,
   };
+}
+
+/** The leaf declined the shape before the command. No journal line. The
+ *  intent log is the only place the reason exists. */
+export function recordLeafRefusal(ctx: HarnessCtx, agent: string, reason: string): Act {
+  ctx.intentLog.append(line(ctx, agent, "refused", ctx.ids.next(), null, reason));
+  return { tag: "refused", reason };
 }
 
 /** A read. One intent line, no reason gate, no journal line, no correlation. */

@@ -5,6 +5,7 @@
 
 import type { Fib } from "../lib/algebra.ts";
 import { type Decoders, leafLocal, type Runner } from "../lib/algebra.ts";
+import { liveAnswer } from "./live.ts";
 import { commitEngine } from "../cli/econ.ts";
 import { type Act, decodeAct } from "./containers.ts";
 import { householdLeaf } from "./household.ts";
@@ -94,70 +95,71 @@ export function firmLeaf(ctx: HarnessCtx, firm: Id): Runner<FirmDayC> {
   };
   return leafLocal(
     agentId,
-    (shape) => {
-      if (shape.tag === "postJob") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "post-job",
-          [
+    (shape) =>
+      liveAnswer(ctx, agentId, shape, (shape) => {
+        if (shape.tag === "postJob") {
+          return asAct(runMutation(
+            ctx,
+            reg,
             "post-job",
-            "--firm",
-            firm,
-            "--career",
-            shape.career,
-            "--generation",
-            String(shape.generation),
-            "--salary",
-            String(shape.salary),
-            "--slots",
-            String(shape.slots),
-          ],
-          { firm },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "postMachine") {
+            [
+              "post-job",
+              "--firm",
+              firm,
+              "--career",
+              shape.career,
+              "--generation",
+              String(shape.generation),
+              "--salary",
+              String(shape.salary),
+              "--slots",
+              String(shape.slots),
+            ],
+            { firm },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "postMachine") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "post-machine",
+            [
+              "post-machine",
+              "--firm",
+              firm,
+              "--type",
+              shape.type,
+              "--generation",
+              String(shape.generation),
+              "--price",
+              String(shape.price),
+              "--qty",
+              String(shape.qty),
+            ],
+            { firm },
+            shape.reason,
+          ));
+        }
         return asAct(runMutation(
           ctx,
           reg,
-          "post-machine",
+          "order-machine",
           [
-            "post-machine",
+            "order-machine",
             "--firm",
             firm,
-            "--type",
-            shape.type,
-            "--generation",
-            String(shape.generation),
-            "--price",
-            String(shape.price),
+            "--listing",
+            shape.listing,
             "--qty",
             String(shape.qty),
+            "--asked",
+            String(shape.asked),
           ],
           { firm },
           shape.reason,
         ));
-      }
-      return asAct(runMutation(
-        ctx,
-        reg,
-        "order-machine",
-        [
-          "order-machine",
-          "--firm",
-          firm,
-          "--listing",
-          shape.listing,
-          "--qty",
-          String(shape.qty),
-          "--asked",
-          String(shape.asked),
-        ],
-        { firm },
-        shape.reason,
-      ));
-    },
+      }),
     decoders,
   );
 }

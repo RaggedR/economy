@@ -6,6 +6,7 @@
 
 import type { Fib } from "../lib/algebra.ts";
 import { type Decoders, leafLocal, type Runner } from "../lib/algebra.ts";
+import { liveAnswer } from "./live.ts";
 import { commitEngine } from "../cli/econ.ts";
 import { type Act, decodeAct } from "./containers.ts";
 import { householdLeaf } from "./household.ts";
@@ -105,15 +106,30 @@ function governmentLeaf(ctx: HarnessCtx): Runner<GovernmentC> {
     setDoctorMix: decodeAct,
     setTeacherMix: decodeAct,
   };
-  return leafLocal(agentId, (shape) => {
-    let last: Act = { tag: "done", correlationId: "" };
-    if (shape.tag === "setDoctorMix") {
+  return leafLocal(agentId, (shape) =>
+    liveAnswer(ctx, agentId, shape, (shape) => {
+      let last: Act = { tag: "done", correlationId: "" };
+      if (shape.tag === "setDoctorMix") {
+        for (const row of shape.assign) {
+          const act = asAct(runMutation(
+            ctx,
+            reg,
+            "assign",
+            ["assign", "--person", row.person, "--disease", row.disease],
+            {},
+            shape.reason,
+          ));
+          if (act.tag === "refused") return act;
+          last = act;
+        }
+        return last;
+      }
       for (const row of shape.assign) {
         const act = asAct(runMutation(
           ctx,
           reg,
           "assign",
-          ["assign", "--person", row.person, "--disease", row.disease],
+          ["assign", "--person", row.person, "--career", row.career],
           {},
           shape.reason,
         ));
@@ -121,21 +137,7 @@ function governmentLeaf(ctx: HarnessCtx): Runner<GovernmentC> {
         last = act;
       }
       return last;
-    }
-    for (const row of shape.assign) {
-      const act = asAct(runMutation(
-        ctx,
-        reg,
-        "assign",
-        ["assign", "--person", row.person, "--career", row.career],
-        {},
-        shape.reason,
-      ));
-      if (act.tag === "refused") return act;
-      last = act;
-    }
-    return last;
-  }, decoders);
+    }), decoders);
 }
 
 function firmLeaf(ctx: HarnessCtx, firm: Id): Runner<FirmHealthC> {
@@ -152,18 +154,38 @@ function firmLeaf(ctx: HarnessCtx, firm: Id): Runner<FirmHealthC> {
     postCure: decodeAct,
     postTuition: decodeAct,
   };
-  return leafLocal(agentId, (shape) => {
-    if (shape.tag === "postCure") {
+  return leafLocal(agentId, (shape) =>
+    liveAnswer(ctx, agentId, shape, (shape) => {
+      if (shape.tag === "postCure") {
+        return asAct(runMutation(
+          ctx,
+          reg,
+          "post-cure",
+          [
+            "post-cure",
+            "--firm",
+            firm,
+            "--disease",
+            shape.disease,
+            "--price",
+            String(shape.price),
+            "--qty",
+            String(shape.qty),
+          ],
+          { firm },
+          shape.reason,
+        ));
+      }
       return asAct(runMutation(
         ctx,
         reg,
-        "post-cure",
+        "post-tuition",
         [
-          "post-cure",
+          "post-tuition",
           "--firm",
           firm,
-          "--disease",
-          shape.disease,
+          "--career",
+          shape.career,
           "--price",
           String(shape.price),
           "--qty",
@@ -172,26 +194,7 @@ function firmLeaf(ctx: HarnessCtx, firm: Id): Runner<FirmHealthC> {
         { firm },
         shape.reason,
       ));
-    }
-    return asAct(runMutation(
-      ctx,
-      reg,
-      "post-tuition",
-      [
-        "post-tuition",
-        "--firm",
-        firm,
-        "--career",
-        shape.career,
-        "--price",
-        String(shape.price),
-        "--qty",
-        String(shape.qty),
-      ],
-      { firm },
-      shape.reason,
-    ));
-  }, decoders);
+    }), decoders);
 }
 
 /** The opening draw. A miss still advances `rng` and journals nothing. */

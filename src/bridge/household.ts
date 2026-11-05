@@ -5,6 +5,7 @@
 
 import { params } from "../world/params.ts";
 import { type Decoders, leafLocal, type Runner } from "../lib/algebra.ts";
+import { liveAnswer } from "./live.ts";
 import type { Id } from "../world/types.ts";
 import {
   type Act,
@@ -120,318 +121,319 @@ export function householdLeaf(ctx: HarnessCtx, person: Id): Runner<HouseholdC> {
   };
   return leafLocal(
     agentId,
-    (shape) => {
-      if (shape.tag === "readBooks") {
-        return { tag: "read", value: econRead(ctx, reg, "books", ["books"]) };
-      }
-      if (shape.tag === "buy") {
-        const lots = shape.lots.length > 0 ? shape.lots : [{ listing: "", qty: 0 }];
-        const encoded = lots.map((lot) => `${lot.listing}:${lot.qty}`).join(",");
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "fill",
-          [
+    (shape) =>
+      liveAnswer(ctx, agentId, shape, (shape) => {
+        if (shape.tag === "readBooks") {
+          return { tag: "read", value: econRead(ctx, reg, "books", ["books"]) };
+        }
+        if (shape.tag === "buy") {
+          const lots = shape.lots.length > 0 ? shape.lots : [{ listing: "", qty: 0 }];
+          const encoded = lots.map((lot) => `${lot.listing}:${lot.qty}`).join(",");
+          return asAct(runMutation(
+            ctx,
+            reg,
             "fill",
-            "--buyer",
-            person,
-            "--asked",
-            String(shape.qty),
-            "--lots",
-            encoded,
-          ],
-          { buyer: person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "sellShare") {
+            [
+              "fill",
+              "--buyer",
+              person,
+              "--asked",
+              String(shape.qty),
+              "--lots",
+              encoded,
+            ],
+            { buyer: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "sellShare") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "sell-share",
+            [
+              "sell-share",
+              "--seller",
+              person,
+              "--bank",
+              shape.bank,
+              "--qty",
+              String(shape.qty),
+              "--price",
+              String(shape.price),
+            ],
+            { seller: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "buyShare") {
+          const lots = shape.lots.length > 0 ? shape.lots : [{ listing: "", qty: 0 }];
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "buy-share",
+            [
+              "buy-share",
+              "--buyer",
+              person,
+              "--asked",
+              String(shape.qty),
+              "--lots",
+              lots.map((lot) => `${lot.listing}:${lot.qty}`).join(","),
+            ],
+            { buyer: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "offerHouse") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "offer-house",
+            [
+              "offer-house",
+              "--owner",
+              person,
+              "--house",
+              shape.house,
+              "--ask",
+              String(shape.ask),
+            ],
+            { owner: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "buyHouse") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "buy-house",
+            [
+              "buy-house",
+              "--buyer",
+              person,
+              "--listing",
+              shape.listing,
+              "--qty",
+              shape.won ? "1" : "0",
+            ],
+            { buyer: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "occupyOrLet") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "occupy",
+            ["occupy", "--owner", person, "--house", shape.house, "--mode", shape.mode],
+            { owner: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "keepJob" || shape.tag === "applyJob") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "hire",
+            [
+              "hire",
+              "--person",
+              person,
+              "--listing",
+              shape.listing,
+              "--seated",
+              shape.seated ? "true" : "false",
+              "--keep",
+              shape.tag === "keepJob" ? "true" : "false",
+            ],
+            { person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "postRent") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "post-rent",
+            [
+              "post-rent",
+              "--owner",
+              person,
+              "--house",
+              shape.house,
+              "--rent",
+              String(shape.rent),
+            ],
+            { owner: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "applyRent") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "apply-rent",
+            [
+              "apply-rent",
+              "--tenant",
+              person,
+              "--listing",
+              shape.listing,
+              "--pay",
+              shape.pay ? "true" : "false",
+            ],
+            { tenant: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "bidCure") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "bid-cure",
+            [
+              "bid-cure",
+              "--person",
+              person,
+              "--disease",
+              shape.disease,
+              "--granted",
+              shape.granted ? "true" : "false",
+            ],
+            { person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "bidEducation") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "bid-education",
+            [
+              "bid-education",
+              "--person",
+              person,
+              "--career",
+              shape.career,
+              "--granted",
+              shape.granted ? "true" : "false",
+            ],
+            { person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "buyCure") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "buy-cure",
+            [
+              "buy-cure",
+              "--person",
+              person,
+              "--disease",
+              shape.disease,
+              "--listing",
+              shape.listing,
+              "--qty",
+              String(shape.qty),
+              "--asked",
+              String(params.cureSize),
+            ],
+            { person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "buyTuition") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "buy-tuition",
+            [
+              "buy-tuition",
+              "--person",
+              person,
+              "--career",
+              shape.career,
+              "--listing",
+              shape.listing,
+              "--qty",
+              String(shape.qty),
+              "--asked",
+              String(params.unitsPerLevel),
+            ],
+            { person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "acceptDebt") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "accept-debt",
+            [
+              "accept-debt",
+              "--issuer",
+              shape.issuer,
+              "--holder",
+              person,
+              "--principal",
+              String(shape.principal),
+              "--installment",
+              String(shape.installment),
+              "--months",
+              String(shape.months),
+              "--issuer-kind",
+              shape.issuerKind,
+            ],
+            { holder: person },
+            shape.reason,
+          ));
+        }
+        if (shape.tag === "pay") {
+          return asAct(runMutation(
+            ctx,
+            reg,
+            "pay",
+            [
+              "pay",
+              "--from",
+              person,
+              "--to",
+              shape.to,
+              "--amount",
+              String(shape.amount),
+              "--row",
+              shape.row,
+            ],
+            { from: person },
+            shape.reason,
+          ));
+        }
         return asAct(runMutation(
           ctx,
           reg,
-          "sell-share",
+          "request-loan",
           [
-            "sell-share",
-            "--seller",
-            person,
+            "request-loan",
             "--bank",
             shape.bank,
-            "--qty",
-            String(shape.qty),
-            "--price",
-            String(shape.price),
-          ],
-          { seller: person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "buyShare") {
-        const lots = shape.lots.length > 0 ? shape.lots : [{ listing: "", qty: 0 }];
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "buy-share",
-          [
-            "buy-share",
-            "--buyer",
-            person,
-            "--asked",
-            String(shape.qty),
-            "--lots",
-            lots.map((lot) => `${lot.listing}:${lot.qty}`).join(","),
-          ],
-          { buyer: person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "offerHouse") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "offer-house",
-          [
-            "offer-house",
-            "--owner",
-            person,
-            "--house",
-            shape.house,
-            "--ask",
-            String(shape.ask),
-          ],
-          { owner: person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "buyHouse") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "buy-house",
-          [
-            "buy-house",
-            "--buyer",
-            person,
-            "--listing",
-            shape.listing,
-            "--qty",
-            shape.won ? "1" : "0",
-          ],
-          { buyer: person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "occupyOrLet") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "occupy",
-          ["occupy", "--owner", person, "--house", shape.house, "--mode", shape.mode],
-          { owner: person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "keepJob" || shape.tag === "applyJob") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "hire",
-          [
-            "hire",
-            "--person",
-            person,
-            "--listing",
-            shape.listing,
-            "--seated",
-            shape.seated ? "true" : "false",
-            "--keep",
-            shape.tag === "keepJob" ? "true" : "false",
-          ],
-          { person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "postRent") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "post-rent",
-          [
-            "post-rent",
-            "--owner",
-            person,
-            "--house",
-            shape.house,
-            "--rent",
-            String(shape.rent),
-          ],
-          { owner: person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "applyRent") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "apply-rent",
-          [
-            "apply-rent",
-            "--tenant",
-            person,
-            "--listing",
-            shape.listing,
-            "--pay",
-            shape.pay ? "true" : "false",
-          ],
-          { tenant: person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "bidCure") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "bid-cure",
-          [
-            "bid-cure",
-            "--person",
-            person,
-            "--disease",
-            shape.disease,
-            "--granted",
-            shape.granted ? "true" : "false",
-          ],
-          { person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "bidEducation") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "bid-education",
-          [
-            "bid-education",
-            "--person",
-            person,
-            "--career",
-            shape.career,
-            "--granted",
-            shape.granted ? "true" : "false",
-          ],
-          { person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "buyCure") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "buy-cure",
-          [
-            "buy-cure",
-            "--person",
-            person,
-            "--disease",
-            shape.disease,
-            "--listing",
-            shape.listing,
-            "--qty",
-            String(shape.qty),
-            "--asked",
-            String(params.cureSize),
-          ],
-          { person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "buyTuition") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "buy-tuition",
-          [
-            "buy-tuition",
-            "--person",
-            person,
-            "--career",
-            shape.career,
-            "--listing",
-            shape.listing,
-            "--qty",
-            String(shape.qty),
-            "--asked",
-            String(params.unitsPerLevel),
-          ],
-          { person },
-          shape.reason,
-        ));
-      }
-      if (shape.tag === "acceptDebt") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "accept-debt",
-          [
-            "accept-debt",
-            "--issuer",
-            shape.issuer,
-            "--holder",
-            person,
-            "--principal",
-            String(shape.principal),
+            "--borrower",
+            shape.borrower,
+            "--amount",
+            String(shape.amount),
+            "--collateral",
+            shape.collateral,
             "--installment",
             String(shape.installment),
             "--months",
             String(shape.months),
-            "--issuer-kind",
-            shape.issuerKind,
           ],
-          { holder: person },
+          { bank: shape.bank, borrower: shape.borrower },
           shape.reason,
         ));
-      }
-      if (shape.tag === "pay") {
-        return asAct(runMutation(
-          ctx,
-          reg,
-          "pay",
-          [
-            "pay",
-            "--from",
-            person,
-            "--to",
-            shape.to,
-            "--amount",
-            String(shape.amount),
-            "--row",
-            shape.row,
-          ],
-          { from: person },
-          shape.reason,
-        ));
-      }
-      return asAct(runMutation(
-        ctx,
-        reg,
-        "request-loan",
-        [
-          "request-loan",
-          "--bank",
-          shape.bank,
-          "--borrower",
-          shape.borrower,
-          "--amount",
-          String(shape.amount),
-          "--collateral",
-          shape.collateral,
-          "--installment",
-          String(shape.installment),
-          "--months",
-          String(shape.months),
-        ],
-        { bank: shape.bank, borrower: shape.borrower },
-        shape.reason,
-      ));
-    },
+      }),
     decoders,
   );
 }

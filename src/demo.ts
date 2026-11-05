@@ -1,6 +1,7 @@
 // demo.ts — the books a stranger can watch. One id source and one clock for the
-// whole run. --live selects the real seams and then refuses: this pass does
-// not call a model, and it does not stamp a live run with the fixed clock.
+// whole run. --live selects the real seams and a model discovered from the
+// provider's catalogue. It does not stamp that run with the fixed clock. The
+// scripted path never calls the model.
 
 import { formatBooks } from "./world/books.ts";
 import { householdLeaf } from "./bridge/household.ts";
@@ -37,6 +38,8 @@ import {
   realIds,
   seededIds,
 } from "./log/ids.ts";
+import { modelBrain } from "./model/brain.ts";
+import { type LiveOpts, openLiveClient } from "./model/wire.ts";
 import { fileJournal } from "./log/journal.ts";
 import { reconSummary } from "./log/reconcile.ts";
 import type { Act } from "./bridge/containers.ts";
@@ -275,15 +278,49 @@ function fillText(act: Act | undefined): string {
   return "refused";
 }
 
-export async function start(argv: string[]): Promise<number> {
-  if (argv.includes("--live")) {
-    // Real seams, selected and not used. A live clock must not stamp these books.
-    const ids = realIds();
-    const clock = realClock();
-    void ids.next;
-    void clock.now;
-    console.error("not implemented");
+function liveOptsFromEnv(): LiveOpts {
+  return {
+    apiKey: Deno.env.get("ECONOMY_API_KEY") ?? Deno.env.get("GROQ_API_KEY") ?? "",
+    baseUrl: Deno.env.get("ECONOMY_BASE_URL") || undefined,
+    model: Deno.env.get("ECONOMY_MODEL") ?? Deno.env.get("GROQ_MODEL") ?? null,
+  };
+}
+
+/** Real ids, real clock, and the model the catalogue named. The month is the
+ *  same function the scripted demo calls. demo-out/live is not part of the
+ *  byte-identical replay. */
+export async function runLive(opts: LiveOpts): Promise<number> {
+  const ids = realIds();
+  const clock = realClock();
+  let name = "";
+  try {
+    const client = await openLiveClient(opts);
+    name = client.name;
+    const ctx = {
+      ...openRig("demo-out/live", monthSeed(), ids, clock),
+      brain: modelBrain(client),
+    };
+    p(`live  ${name}`);
+    const month = await runMonth(ctx);
+    printScene(ctx);
+    p(reconSummary(month.recon));
+    for (const b of month.recon.blocked) p(`  blocked  ${b.agent}  ${b.reason}`);
+    for (const a of month.recon.alarms) p(`  ALARM  ${a.kind}`);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
     return 1;
+  }
+  return 0;
+}
+
+export async function start(argv: string[], live?: LiveOpts): Promise<number> {
+  if (argv.includes("--live")) {
+    const opts = live ?? liveOptsFromEnv();
+    if (!opts.apiKey) {
+      console.error("No API key. Set ECONOMY_API_KEY before a --live run.");
+      return 1;
+    }
+    return runLive(opts);
   }
   await runScripted(seededIds("economy"), fixedClock());
   return 0;
