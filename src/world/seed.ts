@@ -2,6 +2,7 @@
 // the world. Log ids are not.
 
 import type { Bank, Career, Deposits, Firm, Person, World } from "./types.ts";
+import { params } from "./params.ts";
 import { CAREERS } from "./types.ts";
 import { assertInvariant } from "./world.ts";
 
@@ -347,6 +348,189 @@ export function techSeed(): World {
     },
   };
   world.firms.shop.machines = ["m0"];
+  assertInvariant(world);
+  return world;
+}
+
+type TownPost = {
+  firm: string;
+  kind: Firm["kind"];
+  career: Career;
+  who: string;
+  owner: string;
+};
+
+/** One of each kind the plan names. Public firms are the government's. The
+ *  owner of a private firm is also its worker. Nobody is a level-1 engineer. */
+const TOWN: readonly TownPost[] = [
+  { firm: "tech-1", kind: "tech", career: "engineer", who: "nia", owner: "nia" },
+  { firm: "tech-2", kind: "tech", career: "engineer", who: "omar", owner: "omar" },
+  { firm: "tech-3", kind: "tech", career: "engineer", who: "pia", owner: "pia" },
+  { firm: "tech-4", kind: "tech", career: "engineer", who: "quin", owner: "quin" },
+  { firm: "shop-1", kind: "supermarket", career: "retail", who: "ria", owner: "ria" },
+  { firm: "shop-2", kind: "supermarket", career: "retail", who: "sol", owner: "sol" },
+  { firm: "lux-1", kind: "luxury", career: "retail", who: "tara", owner: "tara" },
+  { firm: "lux-2", kind: "luxury", career: "retail", who: "uma", owner: "uma" },
+  { firm: "club-1", kind: "nightclub", career: "hospitality", who: "vic", owner: "vic" },
+  { firm: "club-2", kind: "nightclub", career: "hospitality", who: "wes", owner: "wes" },
+  { firm: "club-3", kind: "nightclub", career: "hospitality", who: "xia", owner: "xia" },
+  {
+    firm: "priv-hosp",
+    kind: "privateHospital",
+    career: "doctor",
+    who: "yara",
+    owner: "yara",
+  },
+  {
+    firm: "priv-uni",
+    kind: "privateUniversity",
+    career: "teacher",
+    who: "zed",
+    owner: "zed",
+  },
+  {
+    firm: "pub-hosp",
+    kind: "publicHospital",
+    career: "doctor",
+    who: "doc",
+    owner: "gov",
+  },
+  {
+    firm: "pub-uni",
+    kind: "publicUniversity",
+    career: "teacher",
+    who: "teach",
+    owner: "gov",
+  },
+];
+
+const TOWN_WAGE = 8;
+
+export type TownCensus = {
+  people: number;
+  firms: number;
+  housed: number;
+  engineer: number;
+  commonMines: number;
+  advancedMines: number;
+};
+
+export function townCensus(world: World): TownCensus {
+  let housed = 0;
+  let engineer = 0;
+  for (const person of Object.values(world.people)) {
+    if (person.dwelling !== null) housed += 1;
+    if (person.education.engineer > engineer) engineer = person.education.engineer;
+  }
+  let commonMines = 0;
+  let advancedMines = 0;
+  for (const mine of Object.values(world.mines)) {
+    if (mine.depositedAt !== null) continue;
+    if (mine.material === "common") commonMines += 1;
+    else advancedMines += 1;
+  }
+  return {
+    people: Object.keys(world.people).length,
+    firms: Object.keys(world.firms).length,
+    housed,
+    engineer,
+    commonMines,
+    advancedMines,
+  };
+}
+
+/** t₀. Full employment, every person housed, indigenous mine owners, no
+ *  level-1 engineer. Not the month prefix: that prefix still asks Ada. */
+export function townSeed(): World {
+  const people: Record<string, Person> = {};
+  for (const post of TOWN) {
+    const person = makePerson(post.who, 10, 0);
+    person.dwelling = `h-${post.who}`;
+    person.job = { firm: post.firm, career: post.career, salary: TOWN_WAGE };
+    if (post.owner === post.who) person.firm = post.firm;
+    people[post.who] = person;
+  }
+  const deposited = Object.keys(people).length * 10;
+  const world = shell(people, deposited, 0);
+  for (const post of TOWN) {
+    world.firms[post.firm] = firmShell(
+      post.firm,
+      post.owner,
+      { a: 0, b: 0 },
+      post.kind,
+    );
+    world.houses[`h-${post.who}`] = {
+      id: `h-${post.who}`,
+      units: params.houseQuantum,
+      owner: post.who,
+      occupant: post.who,
+      lien: null,
+    };
+  }
+  world.mines = {
+    c1: {
+      id: "c1",
+      material: "common",
+      stock: 100,
+      owner: "nia",
+      depositedAt: null,
+      lien: null,
+    },
+    c2: {
+      id: "c2",
+      material: "common",
+      stock: 100,
+      owner: "omar",
+      depositedAt: null,
+      lien: null,
+    },
+    a1: {
+      id: "a1",
+      material: "advanced",
+      stock: 40,
+      owner: "pia",
+      depositedAt: null,
+      lien: null,
+    },
+    a2: {
+      id: "a2",
+      material: "advanced",
+      stock: 40,
+      owner: "quin",
+      depositedAt: null,
+      lien: null,
+    },
+  };
+  assertInvariant(world);
+  return world;
+}
+
+/** Ada is over the mandatory line. Ben owns one quantum and nothing liquid.
+ *  Cleo is homeless, so Ben's house has one place to go. */
+export function kinSeed(): World {
+  const ada = makePerson("ada", params.fertilityMultiple * params.cashGift, 0, "savings");
+  ada.dwelling = "h-ada";
+  const ben = makePerson("ben", 0, 0);
+  ben.dwelling = "h-ben";
+  const cleo = makePerson("cleo", 0, 0);
+  const cash = ada.deposits.a;
+  const world = shell({ ada, ben, cleo }, cash, 0);
+  world.houses = {
+    "h-ada": {
+      id: "h-ada",
+      units: params.fertilityUnits,
+      owner: "ada",
+      occupant: "ada",
+      lien: null,
+    },
+    "h-ben": {
+      id: "h-ben",
+      units: params.houseQuantum,
+      owner: "ben",
+      occupant: "ben",
+      lien: null,
+    },
+  };
   assertInvariant(world);
   return world;
 }

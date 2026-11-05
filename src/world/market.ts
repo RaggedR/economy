@@ -225,7 +225,7 @@ export function markStarvation(
 }
 
 /** The world has already been marked. Three foodless months and nothing liquid
- *  is death. A house does not count. The effect moves no asset. */
+ *  is death. A house does not count. Routing the estate is the caller's plan. */
 export function starvationDeaths(
   world: World,
   rows: readonly { person: Id; filled: Qty }[],

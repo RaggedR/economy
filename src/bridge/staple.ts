@@ -3,9 +3,8 @@
 // only for the people who bid. A later loan's draw has not happened yet when
 // the month calls this: food is not bought with cash the firm still holds.
 
-import { commitEngine } from "../cli/econ.ts";
 import { fileJournal } from "../log/journal.ts";
-import { deathGate } from "../world/gates.ts";
+import { commitDeath } from "./kin.ts";
 import {
   type BuyerPlan,
   clearStaple,
@@ -73,14 +72,7 @@ export async function runStaple(
   const marked = markStarvation(loadWorld(ctx.worldPath), rows);
   saveWorld(ctx.worldPath, marked);
   for (const person of starvationDeaths(loadWorld(ctx.worldPath), rows)) {
-    const gate = deathGate(loadWorld(ctx.worldPath), person);
-    if (!gate.ok) throw new Error(gate.reason);
-    commitEngine(
-      { world: ctx.worldPath, journal: ctx.journalPath },
-      gate.effect,
-      ctx.ids,
-      ctx.clock,
-    );
+    commitDeath(ctx, person);
   }
   return acts;
 }

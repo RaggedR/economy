@@ -23,6 +23,7 @@ import { payGate } from "../world/gates.ts";
 import { planOpening } from "../world/fold.ts";
 import { remainderDraws } from "../world/purses.ts";
 import { runDiscretionary, runDisease, runPublic } from "./health.ts";
+import { runBirths, settleDead } from "./kin.ts";
 import { runTech } from "./tech.ts";
 import { runSpecialDay } from "./special.ts";
 import { runStaple } from "./staple.ts";
@@ -154,6 +155,12 @@ export async function runMonth(ctx: HarnessCtx): Promise<MonthResult> {
       ctx.clock,
     );
   }
+
+  // Births, then any estate a death left behind. Reproduction is not a shape.
+  // monthSeed is under both fertility lines and nobody has died, so this
+  // writes nothing and the journal stays pay then lendBank.
+  runBirths(ctx);
+  settleDead(ctx);
 
   // 4. Auditor: invariant and reconcile. Two asks, not a tensor.
   const auditor = auditorLeaf(ctx);

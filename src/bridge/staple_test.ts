@@ -109,15 +109,23 @@ Deno.test("three foodless months and a house, and nothing else, is death", async
   const world = loadWorld(ctx.worldPath);
   assertEquals(world.people.cleo.alive, false);
   assertEquals(world.people.cleo.starvation, 3);
-  assertEquals(world.houses["h-cleo"].owner, "cleo");
+  assertEquals(world.people.cleo.dwelling, null);
+  assertEquals(world.people.cleo.deposits.a + world.people.cleo.deposits.b, 0);
+  // Ada and Ben are both homeless. Seed 1's first draw picks Ben.
+  assertEquals(world.houses["h-cleo"].owner, "ben");
+  assertEquals(world.houses["h-cleo"].occupant, "ben");
+  assertEquals(world.people.ben.dwelling, "h-cleo");
+  assertEquals(world.people.ada.dwelling, null);
   assertEquals(world.listings[0].qty, 1);
   assertEquals(world.firms.shop.inventory.staple, 1);
   const journal = fileJournal(ctx.journalPath).all();
-  assertEquals(journal.map((e) => e.effect), ["post", "fill", "death"]);
+  assertEquals(journal.map((e) => e.effect), ["post", "fill", "grantHouse", "death"]);
   assertEquals(journal[2].source, "engine");
+  assertEquals(journal[3].source, "engine");
   assertInvariant(world);
   const intent = ctx.intentLog.all().filter((r) =>
-    r.correlationId === journal[2].correlationId
+    r.correlationId === journal[2].correlationId ||
+    r.correlationId === journal[3].correlationId
   );
   assertEquals(intent, []);
 });

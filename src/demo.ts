@@ -7,6 +7,7 @@ import { householdLeaf } from "./bridge/household.ts";
 import { healthSceneOrders, runHealth } from "./bridge/health.ts";
 import { runTechScene } from "./bridge/tech.ts";
 import { runSpecialDay, specialSceneOrders } from "./bridge/special.ts";
+import { commitDeath, runBirths } from "./bridge/kin.ts";
 import { runStaple } from "./bridge/staple.ts";
 import { commitEngine } from "./cli/econ.ts";
 import { planOpening } from "./world/fold.ts";
@@ -14,12 +15,15 @@ import { postGoodGate } from "./world/gates.ts";
 import { remainderDraws } from "./world/purses.ts";
 import {
   healthSeed,
+  kinSeed,
   marketSeed,
   monthSeed,
   purseSeed,
   specialSeed,
   storySeed,
   techSeed,
+  townCensus,
+  townSeed,
 } from "./world/seed.ts";
 import { ops, output } from "./world/tech.ts";
 import { loadWorld, saveWorld } from "./world/store.ts";
@@ -215,6 +219,29 @@ async function runScripted(ids: IdSource, clock: Clock): Promise<void> {
   );
   p(
     `purses  shop ${built.firms.shop.deposits.a}  mill ${built.firms.mill.deposits.a}`,
+  );
+
+  p("\n— kin: the town at t₀, then a forced birth and a childless house —\n");
+  const census = townCensus(townSeed());
+  p(
+    `town  people ${census.people}  firms ${census.firms}  housed ${census.housed}  ` +
+      `engineer ${census.engineer}  mines ${census.commonMines} common ${census.advancedMines} advanced`,
+  );
+  const kinCtx = openRig("demo-out/kin", kinSeed(), ids, clock);
+  runBirths(kinCtx);
+  commitDeath(kinCtx, "ben");
+  printScene(kinCtx);
+  const kin = loadWorld(kinCtx.worldPath);
+  const child = Object.values(kin.people).find((person) => person.parent === "ada");
+  const born = child ? kin.houses[child.dwelling ?? ""] : undefined;
+  p(
+    `birth  ${child?.id ?? "none"}  units ${born?.units ?? 0}  ` +
+      `cash ${child ? child.deposits.a + child.deposits.b : 0}  ` +
+      `ada units ${kin.houses["h-ada"].units}  ada cash ${kin.people.ada.deposits.a}`,
+  );
+  p(
+    `death  ben ${kin.people.ben.alive ? "alive" : "dead"}  ` +
+      `h-ben ${kin.houses["h-ben"].owner}  cleo ${kin.people.cleo.dwelling ?? "none"}`,
   );
 }
 

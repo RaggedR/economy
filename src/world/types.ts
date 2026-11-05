@@ -70,7 +70,8 @@ export type FlowRow =
   | "mineTrade"
   | "debtTrade"
   | "shareTrade"
-  | "writeOff";
+  | "writeOff"
+  | "estate";
 
 /** A signed line. The sum of a holder's lines equals that holder's ΔNFA. */
 export type FlowEntry = {
@@ -365,6 +366,10 @@ export type Effect =
   | { tag: "buyTuition"; person: Id; listing: Id; qty: Qty }
   | { tag: "archiveJobs"; listings: JobArchive["listings"] }
   | { tag: "death"; person: Id }
+  | { tag: "birth"; parent: Id }
+  | { tag: "grantHouse"; house: Id; person: Id; units: number }
+  | { tag: "escheat"; person: Id }
+  | { tag: "vest"; person: Id; heir: Id }
   | { tag: "depositMine"; mine: Id; bank: BankId; shares: Qty }
   | { tag: "seize"; loan: Id }
   | { tag: "dividend"; bank: BankId }
@@ -399,6 +404,7 @@ export const FLOW_ROWS: readonly FlowRow[] = [
   "debtTrade",
   "shareTrade",
   "writeOff",
+  "estate",
 ];
 
 export const CAREERS: readonly Career[] = [

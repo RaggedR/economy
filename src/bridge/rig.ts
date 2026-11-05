@@ -29,6 +29,9 @@ export function openRig(
   const journalPath = `${dir}/journal.jsonl`;
   const intentPath = `${dir}/intent-log.jsonl`;
   saveWorld(worldPath, seed);
+  // A book even when every commit is engine. Empty means no agent spoke.
+  // The journal stays absent until something commits.
+  Deno.writeTextFileSync(intentPath, "");
   const intentLog = fileIntentLog(intentPath);
   const econ = (argv: string[]) =>
     run(

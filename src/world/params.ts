@@ -4,7 +4,7 @@
 // leverageMultiple is the interface's default of 10. The others are
 // placeholders. Sweeping them is not part of milestones 0–5.
 
-import type { Material, Money } from "./types.ts";
+import type { Material, Money, Objective } from "./types.ts";
 
 export const params = {
   /** Percent of collateral value a bank loan may reach. No spec default. */
@@ -68,4 +68,29 @@ export const params = {
   advancedSalary: 12,
   /** Engineer slots expand adds. */
   expandSlots: 1,
+  /** House quantum. Fixed by the interface: gift, escheat, sizes. */
+  houseQuantum: 10,
+  /**
+   * Cash gifted to a newborn. The spec says about a year of staple. Twelve
+   * months at `stapleReservePrice` is the placeholder.
+   */
+  cashGift: 60,
+  /** Spare real-estate quanta, and this multiple of G, per voluntary child. */
+  fertilityLiquidMultiple: 3,
+  /** Owned units that force a birth. */
+  fertilityUnits: 100,
+  /** This multiple of G in deposits, with the unit test, forces a birth. */
+  fertilityMultiple: 10,
+  /**
+   * Percent chance of a voluntary birth, by objective. All zero: the
+   * voluntary band is visible and does not fire. A positive weight is a
+   * later calibration, not a policy chosen here.
+   */
+  fertilityWeight: {
+    happiness: 0,
+    health: 0,
+    education: 0,
+    savings: 0,
+    investment: 0,
+  } as Record<Objective, number>,
 };

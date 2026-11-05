@@ -27,6 +27,7 @@ import {
   tuitionCareer,
 } from "./types.ts";
 import { type StrategyMode, strategyPlan } from "./tech.ts";
+import { fertility } from "./kin.ts";
 import { collateralValue, markedMineBase, purseOf } from "./world.ts";
 
 export type GateResult =
@@ -159,6 +160,16 @@ export function deathGate(world: World, personId: Id): GateResult {
   if (!person) return refused(`no person ${personId}`);
   if (!person.alive) return refused(`${personId} is already dead`);
   return ok({ tag: "death", person: personId });
+}
+
+/** Forced birth only. The voluntary band is a weight, and the weight is zero. */
+export function birthGate(world: World, parentId: Id): GateResult {
+  const person = world.people[parentId];
+  if (!person) return refused(`no person ${parentId}`);
+  if (!person.alive) return refused(`${parentId} is dead`);
+  const band = fertility(world, parentId);
+  if (band !== "mandatory") return refused(`${parentId} is not forced to birth`);
+  return ok({ tag: "birth", parent: parentId });
 }
 
 export function payGate(

@@ -18,19 +18,23 @@
 import { params } from "./params.ts";
 import type {
   BankId,
+  Career,
   Deposits,
   Effect,
   FlowEntry,
+  House,
   Id,
   Listing,
   Loan,
   Machine,
   Material,
   Money,
+  Person,
   Qty,
   World,
 } from "./types.ts";
 import {
+  CAREERS,
   diseaseOf,
   goodOf,
   houseOf,
@@ -258,6 +262,41 @@ export function assertInvariant(world: World): void {
     }
   }
   for (const line of world.flows) assertInteger(`flow ${line.row}`, line.amount);
+
+  for (const person of Object.values(world.people)) {
+    if (person.alive) continue;
+    if (person.deposits.a !== 0 || person.deposits.b !== 0) {
+      throw new LeakError(`${person.id} is dead and still holds deposits`);
+    }
+    if (person.firm !== null) {
+      throw new LeakError(`${person.id} is dead and still owns ${person.firm}`);
+    }
+    for (const house of Object.values(world.houses)) {
+      if (house.owner === person.id) {
+        throw new LeakError(`${person.id} is dead and still owns ${house.id}`);
+      }
+    }
+    for (const share of Object.values(world.shares)) {
+      if (share.holder === person.id && share.units > 0) {
+        throw new LeakError(`${person.id} is dead and still holds ${share.id}`);
+      }
+    }
+    for (const loan of Object.values(world.loans)) {
+      if (loan.kind === "private" && loan.holder === person.id && loan.principal > 0) {
+        throw new LeakError(`${person.id} is dead and still holds ${loan.id}`);
+      }
+    }
+    for (const mine of Object.values(world.mines)) {
+      if (mine.owner === person.id) {
+        throw new LeakError(`${person.id} is dead and still owns ${mine.id}`);
+      }
+    }
+    for (const firm of Object.values(world.firms)) {
+      if (firm.owner === person.id) {
+        throw new LeakError(`${person.id} is dead and still owns ${firm.id}`);
+      }
+    }
+  }
 }
 
 function linesOf(built: FlowEntry[], month: number): FlowEntry[] {
@@ -546,6 +585,237 @@ function writeOffNumbers(world: World, loan: Loan): { world: World; lines: FlowE
   return {
     world: next,
     lines: pair(month, "writeOff", loan.bank, loan.borrower, loan.principal),
+  };
+}
+
+function blankEducation(): Record<Career, number> {
+  return Object.fromEntries(CAREERS.map((career) => [career, 0])) as Record<
+    Career,
+    number
+  >;
+}
+
+/** Prefer a house that is not the dwelling, then the lowest id. */
+function giftSource(world: World, parentId: Id): House | null {
+  const person = world.people[parentId];
+  if (!person) return null;
+  const rows = Object.values(world.houses)
+    .filter((house) => {
+      if (house.owner !== parentId || house.lien !== null) return false;
+      const reserved = house.id === person.dwelling ? params.houseQuantum : 0;
+      return house.units - reserved >= params.houseQuantum;
+    })
+    .sort((x, y) => {
+      const xd = x.id === person.dwelling ? 1 : 0;
+      const yd = y.id === person.dwelling ? 1 : 0;
+      if (xd !== yd) return xd - yd;
+      return x.id < y.id ? -1 : x.id > y.id ? 1 : 0;
+    });
+  return rows[0] ?? null;
+}
+
+function giveHouse(
+  world: World,
+  house: House,
+  personId: Id,
+  units: number,
+): { world: World; houseId: Id } {
+  if (!Number.isInteger(units) || units <= 0 || units % params.houseQuantum !== 0) {
+    throw new LeakError(`grant of ${units} is not a positive quantum`);
+  }
+  if (units > house.units) {
+    throw new LeakError(`${house.id} has ${house.units}, short of ${units}`);
+  }
+  const person = world.people[personId];
+  if (!person || !person.alive) throw new LeakError(`no living person ${personId}`);
+  if (house.lien !== null) throw new LeakError(`lien blocks grant of ${house.id}`);
+  if (!world.people[house.owner]) {
+    throw new LeakError(`${house.id} is not owned by a person`);
+  }
+
+  let next = world;
+  let grantedId = house.id;
+  let houses = { ...world.houses };
+  if (units < house.units) {
+    const taken = takeId(world, "house");
+    next = taken.world;
+    grantedId = taken.id;
+    houses = {
+      ...taken.world.houses,
+      [house.id]: { ...house, units: house.units - units },
+      [grantedId]: {
+        id: grantedId,
+        units,
+        owner: personId,
+        occupant: null,
+        lien: null,
+      },
+    };
+  } else {
+    houses = {
+      ...houses,
+      [house.id]: { ...house, owner: personId, occupant: null },
+    };
+  }
+
+  let people = { ...next.people };
+  if (person.dwelling === null) {
+    houses = {
+      ...houses,
+      [grantedId]: { ...houses[grantedId], occupant: personId },
+    };
+    people = {
+      ...people,
+      [personId]: { ...people[personId], dwelling: grantedId },
+    };
+  }
+  return { world: { ...next, houses, people }, houseId: grantedId };
+}
+
+/** Deposits, receivables, shares, mines, leftover houses, and firms. */
+function convey(
+  world: World,
+  from: Id,
+  to: Id,
+): { world: World; lines: FlowEntry[] } {
+  if (from === to) throw new LeakError(`${from} cannot receive their own estate`);
+  if (!purseOf(world, to)) throw new LeakError(`no purse for ${to}`);
+  const month = world.month;
+  let lines: FlowEntry[] = [];
+  let next = world;
+
+  const purse = purseOf(next, from);
+  const cash = purse ? purse.a + purse.b : 0;
+  if (cash > 0) {
+    next = payAcrossHolders(next, from, to, cash);
+    lines = pair(month, "estate", from, to, cash);
+  }
+
+  let shares = { ...next.shares };
+  for (const share of Object.values(world.shares)) {
+    if (share.holder !== from || share.units <= 0) continue;
+    shares = { ...shares, [share.id]: { ...share, holder: to } };
+  }
+  next = { ...next, shares };
+
+  let loans = { ...next.loans };
+  for (const loan of Object.values(world.loans)) {
+    if (loan.kind !== "private" || loan.holder !== from) continue;
+    loans = { ...loans, [loan.id]: { ...loan, holder: to } };
+    lines = [...lines, ...pair(month, "Δprivate", from, to, loan.principal)];
+  }
+  next = { ...next, loans };
+
+  let mines = { ...next.mines };
+  for (const mine of Object.values(world.mines)) {
+    if (mine.owner !== from) continue;
+    if (mine.depositedAt !== null) continue;
+    if (mine.lien !== null) throw new LeakError(`lien remains on ${mine.id}`);
+    mines = { ...mines, [mine.id]: { ...mine, owner: to } };
+  }
+  next = { ...next, mines };
+
+  let houses = { ...next.houses };
+  for (const house of Object.values(world.houses)) {
+    if (house.owner !== from) continue;
+    if (house.lien !== null) throw new LeakError(`lien remains on ${house.id}`);
+    const occupant = house.occupant === from ? null : house.occupant;
+    houses = { ...houses, [house.id]: { ...house, owner: to, occupant } };
+  }
+  next = { ...next, houses };
+
+  let firms = { ...next.firms };
+  for (const firm of Object.values(world.firms)) {
+    if (firm.owner !== from) continue;
+    firms = { ...firms, [firm.id]: { ...firm, owner: to } };
+  }
+  next = { ...next, firms };
+
+  const gone = next.people[from];
+  if (gone) {
+    next = {
+      ...next,
+      people: { ...next.people, [from]: { ...gone, firm: null } },
+    };
+  }
+  const heir = next.people[to];
+  if (heir && heir.firm === null) {
+    const owned = Object.values(next.firms)
+      .filter((firm) => firm.owner === to)
+      .sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+    if (owned.length > 0) {
+      next = {
+        ...next,
+        people: { ...next.people, [to]: { ...heir, firm: owned[0].id } },
+      };
+    }
+  }
+  return { world: next, lines };
+}
+
+function bear(world: World, parentId: Id): { world: World; lines: FlowEntry[] } {
+  const parent = world.people[parentId];
+  if (!parent || !parent.alive) throw new LeakError(`no living parent ${parentId}`);
+  const source = giftSource(world, parentId);
+  if (!source) throw new LeakError(`${parentId} has no house to give`);
+  const childTaken = takeId(world, "child");
+  let next = childTaken.world;
+  const childId = childTaken.id;
+  const quantum = params.houseQuantum;
+  let houseId = source.id;
+  let houses = { ...next.houses };
+  if (source.units === quantum) {
+    houses = {
+      ...houses,
+      [source.id]: { ...source, owner: childId, occupant: childId },
+    };
+  } else {
+    const houseTaken = takeId(next, "house");
+    next = houseTaken.world;
+    houseId = houseTaken.id;
+    houses = {
+      ...houseTaken.world.houses,
+      [source.id]: { ...source, units: source.units - quantum },
+      [houseId]: {
+        id: houseId,
+        units: quantum,
+        owner: childId,
+        occupant: childId,
+        lien: null,
+      },
+    };
+  }
+  const child: Person = {
+    id: childId,
+    alive: true,
+    objective: parent.objective,
+    health: 0,
+    happiness: 0,
+    education: blankEducation(),
+    diseases: [],
+    assignment: null,
+    starvation: 0,
+    job: null,
+    dwelling: houseId,
+    parent: parentId,
+    children: [],
+    firm: null,
+    deposits: { a: 0, b: 0 },
+  };
+  const mother = next.people[parentId];
+  next = {
+    ...next,
+    houses,
+    people: {
+      ...next.people,
+      [childId]: child,
+      [parentId]: { ...mother, children: [...mother.children, childId] },
+    },
+  };
+  next = payAcrossHolders(next, parentId, childId, params.cashGift);
+  return {
+    world: next,
+    lines: pair(next.month, "estate", parentId, childId, params.cashGift),
   };
 }
 
@@ -1308,17 +1578,37 @@ function applyBare(world: World, effect: Effect): { world: World; lines: FlowEnt
       const person = world.people[effect.person];
       if (!person) throw new LeakError(`no person ${effect.person}`);
       if (!person.alive) throw new LeakError(`${effect.person} is already dead`);
+      let houses = world.houses;
+      for (const house of Object.values(world.houses)) {
+        if (house.occupant !== person.id) continue;
+        houses = { ...houses, [house.id]: { ...house, occupant: null } };
+      }
       return {
         world: {
           ...world,
+          houses,
           people: {
             ...world.people,
-            [person.id]: { ...person, alive: false },
+            [person.id]: { ...person, alive: false, job: null, dwelling: null },
           },
         },
         lines: [],
       };
     }
+    case "birth":
+      return bear(world, effect.parent);
+    case "grantHouse": {
+      const house = world.houses[effect.house];
+      if (!house) throw new LeakError(`no house ${effect.house}`);
+      return {
+        world: giveHouse(world, house, effect.person, effect.units).world,
+        lines: [],
+      };
+    }
+    case "escheat":
+      return convey(world, effect.person, world.government.id);
+    case "vest":
+      return convey(world, effect.person, effect.heir);
     case "strategy": {
       if (effect.posts.length === 0) throw new LeakError("strategy posted nothing");
       let next = world;
