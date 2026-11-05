@@ -23,6 +23,7 @@ import { payGate } from "../world/gates.ts";
 import { planOpening } from "../world/fold.ts";
 import { remainderDraws } from "../world/purses.ts";
 import { runDiscretionary, runDisease, runPublic } from "./health.ts";
+import { runTech } from "./tech.ts";
 import { runSpecialDay } from "./special.ts";
 import { runStaple } from "./staple.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
@@ -137,6 +138,10 @@ export async function runMonth(ctx: HarnessCtx): Promise<MonthResult> {
 
   // Private cures and tuition. After staple and after the special day's rent.
   // The month prefix hands nothing, so this writes nothing.
+  // The tech summand. The month prefix hands no strategy, so this writes
+  // nothing and monthSeed's journal stays pay then lendBank.
+  await runTech(ctx, {});
+
   await runDiscretionary(ctx, {});
 
   // After the capital step. Remainder of a solvent firm goes to its owner.

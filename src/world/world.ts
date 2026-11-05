@@ -22,6 +22,7 @@ import type {
   Effect,
   FlowEntry,
   Id,
+  Listing,
   Loan,
   Machine,
   Material,
@@ -1317,6 +1318,25 @@ function applyBare(world: World, effect: Effect): { world: World; lines: FlowEnt
         },
         lines: [],
       };
+    }
+    case "strategy": {
+      if (effect.posts.length === 0) throw new LeakError("strategy posted nothing");
+      let next = world;
+      for (const post of effect.posts) {
+        if (post.seller !== effect.firm) {
+          throw new LeakError(`${post.seller} is not ${effect.firm}`);
+        }
+        if (post.kind !== "job" && post.kind !== "machine") {
+          throw new LeakError(`strategy cannot post ${post.kind}`);
+        }
+        const taken = takeId(next, "list");
+        const listing: Listing = { ...post, id: taken.id };
+        next = { ...taken.world, listings: [...next.listings, listing] };
+      }
+      if (Object.keys(next.machines).length !== Object.keys(world.machines).length) {
+        throw new LeakError("strategy minted a machine");
+      }
+      return { world: next, lines: [] };
     }
   }
 }

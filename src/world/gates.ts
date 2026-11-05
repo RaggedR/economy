@@ -26,6 +26,7 @@ import {
   shareBank,
   tuitionCareer,
 } from "./types.ts";
+import { type StrategyMode, strategyPlan } from "./tech.ts";
 import { collateralValue, markedMineBase, purseOf } from "./world.ts";
 
 export type GateResult =
@@ -977,4 +978,14 @@ export function buyTuitionGate(
   const short = funds(world, personId, cost);
   if (short) return refused(short);
   return ok({ tag: "buyTuition", person: personId, listing: listingId, qty });
+}
+
+export function strategyGate(
+  world: World,
+  firmId: Id,
+  mode: StrategyMode,
+): GateResult {
+  const plan = strategyPlan(world, firmId, mode);
+  if ("reason" in plan) return refused(plan.reason);
+  return ok({ tag: "strategy", firm: firmId, mode, posts: plan.posts });
 }

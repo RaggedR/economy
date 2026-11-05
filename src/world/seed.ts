@@ -299,6 +299,54 @@ export function healthSeed(): World {
     "priv-hosp": firmShell("priv-hosp", "ada", { a: 0, b: 0 }, "privateHospital"),
     "priv-uni": firmShell("priv-uni", "ada", { a: 0, b: 0 }, "privateUniversity"),
   };
+  // One generation-0 machine each. One operator staffs half of ops(c, 0) and
+  // that half is one award. The builder is not a firm, so maintenance is zero.
+  world.machines = {
+    "m-doc": {
+      id: "m-doc",
+      type: "doctor",
+      generation: 0,
+      owner: "pub-hosp",
+      builder: "mill",
+    },
+    "m-teach": {
+      id: "m-teach",
+      type: "teacher",
+      generation: 0,
+      owner: "pub-uni",
+      builder: "mill",
+    },
+  };
+  world.firms["pub-hosp"].machines = ["m-doc"];
+  world.firms["pub-uni"].machines = ["m-teach"];
+  assertInvariant(world);
+  return world;
+}
+
+/** Mill has delivered one generation-0 retail machine. The shop can pay for
+ *  the next one. The plan offers it. Delivery is what mints generation 1. */
+export function techSeed(): World {
+  let world = shell(
+    {
+      ada: makePerson("ada", 0, 0),
+      ben: makePerson("ben", 0, 0),
+    },
+    0,
+    0,
+  );
+  world = placeFirm(world, firmShell("mill", "ada", { a: 0, b: 0 }, "tech"));
+  world = placeFirm(world, firmShell("shop", "ben", { a: 30, b: 0 }));
+  world.firms.mill.salesLastMonth = 1;
+  world.machines = {
+    m0: {
+      id: "m0",
+      type: "retail",
+      generation: 0,
+      owner: "shop",
+      builder: "mill",
+    },
+  };
+  world.firms.shop.machines = ["m0"];
   assertInvariant(world);
   return world;
 }

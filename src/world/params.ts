@@ -43,9 +43,29 @@ export const params = {
   /** Teacher-time for one level-up. No spec default. */
   unitsPerLevel: 10,
   /**
-   * Public awards one assigned doctor or teacher yields this month.
-   * output(c, g) is the tech summand, not this market. One award is one cure
-   * or one level, not a partial fill.
+   * ops(c, 0) for every career except bureaucrat. It falls to `opsLater` once
+   * g ≥ 1. The floor is 1: a positive integer cannot fall forever.
    */
-  awardsPerAssignee: 1,
+  opsAt0: 2,
+  /** ops(c, g) for g ≥ 1, other than bureaucrat. */
+  opsLater: 1,
+  /** β. ops(bureaucrat, g) at every g. The interface's default is 1. */
+  bureaucratOps: 1,
+  /**
+   * output(c, 0), units per machine. The placeholder does not vary by career.
+   * Half of it, one operator against ops(c, 0), is one cure and one level.
+   */
+  outputAt0: 20,
+  /** output(c, g) for g ≥ 1. It does not fall. This placeholder rises once. */
+  outputLater: 40,
+  /** Posted price of the current generation. No spec default. */
+  machinePrice: 10,
+  /** Added to that price when the next generation is offered. */
+  upgradePremium: 5,
+  /** Wage on an engineer slot at the current generation. */
+  engineerSalary: 8,
+  /** Wage on the advanced slot upgrade lists. Higher than the current one. */
+  advancedSalary: 12,
+  /** Engineer slots expand adds. */
+  expandSlots: 1,
 };

@@ -369,7 +369,13 @@ export type Effect =
   | { tag: "seize"; loan: Id }
   | { tag: "dividend"; bank: BankId }
   | { tag: "setLoanRate"; bank: BankId; rate: Rate }
-  | { tag: "draw"; firm: Id; owner: Id; amount: Money };
+  | { tag: "draw"; firm: Id; owner: Id; amount: Money }
+  | {
+    tag: "strategy";
+    firm: Id;
+    mode: "stay" | "expand" | "upgrade";
+    posts: Listing[];
+  };
 
 export const FLOW_ROWS: readonly FlowRow[] = [
   "wages",

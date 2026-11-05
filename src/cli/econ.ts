@@ -39,6 +39,7 @@ import {
   seizeGate,
   sellCapitalGate,
   setLoanRateGate,
+  strategyGate,
   tradeShareGate,
   transferHouseGate,
   transferPrivateGate,
@@ -764,6 +765,18 @@ function run(argv: string[], ids: IdSource, clock: Clock): { value: unknown } {
           flags,
           [gate.effect],
           asked,
+        ),
+      };
+    }
+    case "strategy": {
+      const mode = str(flags, "mode");
+      if (mode !== "stay" && mode !== "expand" && mode !== "upgrade") {
+        throw new Refusal("mode must be stay, expand, or upgrade");
+      }
+      return {
+        value: commit(
+          "strategy",
+          strategyGate(world(), str(flags, "firm") ?? "", mode),
         ),
       };
     }

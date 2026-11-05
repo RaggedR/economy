@@ -10,12 +10,13 @@
 // house-sale permutation draws once per claimant, including the last. A tier
 // the awards cover, and a tier with nothing left, does not draw.
 //
-// One assigned public doctor or teacher is one award. output(c, g) is the tech
-// summand. A winner takes the whole cure or the whole level. A loser takes
-// nothing. Private cures and tuition are not this draw.
+// Public supply is output(c, g) of the machines those assignees staff. One
+// assignee is not one award. A winner takes the whole cure or the whole level.
+// A loser takes nothing. Private cures and tuition are not this draw.
 
 import { params } from "./params.ts";
 import { nextIndex, nextUint } from "./rng.ts";
+import { awardSupply } from "./tech.ts";
 import type { Career, Disease, Id, Money, Qty, World } from "./types.ts";
 import { CAREERS, diseaseOf, DISEASES, tuitionCareer } from "./types.ts";
 import { purseOf } from "./world.ts";
@@ -91,29 +92,11 @@ function permute<T>(world: World, pool: readonly T[]): { world: World; order: T[
 }
 
 function publicDoctors(world: World, disease: Disease): number {
-  let n = 0;
-  for (const person of Object.values(world.people)) {
-    if (!person.alive || person.assignment !== disease) continue;
-    const job = person.job;
-    if (!job || job.career !== "doctor") continue;
-    const firm = world.firms[job.firm];
-    if (!firm || firm.folded || firm.kind !== "publicHospital") continue;
-    n++;
-  }
-  return n * params.awardsPerAssignee;
+  return awardSupply(world, "doctor", disease);
 }
 
 function publicTeachers(world: World, career: Career): number {
-  let n = 0;
-  for (const person of Object.values(world.people)) {
-    if (!person.alive || person.assignment !== career) continue;
-    const job = person.job;
-    if (!job || job.career !== "teacher") continue;
-    const firm = world.firms[job.firm];
-    if (!firm || firm.folded || firm.kind !== "publicUniversity") continue;
-    n++;
-  }
-  return n * params.awardsPerAssignee;
+  return awardSupply(world, "teacher", career);
 }
 
 function serve<T extends { person: Id }>(

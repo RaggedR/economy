@@ -5,6 +5,7 @@
 import { formatBooks } from "./world/books.ts";
 import { householdLeaf } from "./bridge/household.ts";
 import { healthSceneOrders, runHealth } from "./bridge/health.ts";
+import { runTechScene } from "./bridge/tech.ts";
 import { runSpecialDay, specialSceneOrders } from "./bridge/special.ts";
 import { runStaple } from "./bridge/staple.ts";
 import { commitEngine } from "./cli/econ.ts";
@@ -18,7 +19,9 @@ import {
   purseSeed,
   specialSeed,
   storySeed,
+  techSeed,
 } from "./world/seed.ts";
+import { ops, output } from "./world/tech.ts";
 import { loadWorld, saveWorld } from "./world/store.ts";
 import {
   type Clock,
@@ -181,6 +184,37 @@ async function runScripted(ids: IdSource, clock: Clock): Promise<void> {
     `purses  cleo ${health.people.cleo.deposits.a}  ` +
       `hospital ${health.firms["priv-hosp"].deposits.a}  ` +
       `university ${health.firms["priv-uni"].deposits.a}`,
+  );
+
+  p("\n— tech: the plan offers generation 1, and delivery is what mints it —\n");
+  const techCtx = openRig("demo-out/tech", techSeed(), ids, clock);
+  await runTechScene(techCtx);
+  printScene(techCtx);
+  const built = loadWorld(techCtx.worldPath);
+  const generations = Object.values(built.machines)
+    .map((machine) => machine.generation)
+    .sort((a, b) => a - b);
+  const made = Object.values(built.machines).find((machine) => machine.generation === 1);
+  const offer = built.listings.find((listing) => listing.kind === "machine");
+  const slot = built.listings.find((listing) => listing.kind === "job");
+  const offerGen = offer?.payload && "generation" in offer.payload
+    ? offer.payload.generation
+    : "none";
+  const slotGen = slot?.payload && "generation" in slot.payload
+    ? slot.payload.generation
+    : "none";
+  p(`generations ${generations.join(" ")}`);
+  p(
+    `delivered  generation ${made?.generation ?? "none"}  ` +
+      `owner ${made?.owner ?? "none"}  builder ${made?.builder ?? "none"}`,
+  );
+  p(`offer generation ${offerGen}  engineer slot generation ${slotGen}`);
+  p(
+    `ops engineer  ${ops("engineer", 0)} at 0, ${ops("engineer", 1)} at 1  ` +
+      `output  ${output("engineer", 0)} at 0, ${output("engineer", 1)} at 1`,
+  );
+  p(
+    `purses  shop ${built.firms.shop.deposits.a}  mill ${built.firms.mill.deposits.a}`,
   );
 }
 
