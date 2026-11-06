@@ -109,6 +109,16 @@ function lineOf(world: World): MonthLine {
   };
 }
 
+/** Drop sold-out discretionary listings so the book does not grow without bound
+ *  over a long run — produced goods post a fresh listing every month. A staple
+ *  listing is kept even at qty 0: a sold-out one carries next month's price. */
+function prune(world: World): World {
+  const listings = world.listings.filter((listing) =>
+    listing.qty > 0 || goodOf(listing.payload) === "staple"
+  );
+  return listings.length === world.listings.length ? world : { ...world, listings };
+}
+
 function commitRemainder(ctx: HarnessCtx): void {
   for (const effect of remainderDraws(loadWorld(ctx.worldPath))) {
     commitEngine(
@@ -183,8 +193,9 @@ function commitProduce(ctx: HarnessCtx): void {
 }
 
 /** Consumption becomes wellbeing, then wellbeing decays. A nightclub bought this
- *  month is one happiness; luxury food is one health; both erode by
- *  params.wellbeingDecay toward zero, so a level must be maintained by spending.
+ *  month is one happiness; luxury food is one health; a fraction of the standing
+ *  level erodes each month (params.wellbeingDecay), so a sustained level is
+ *  funded by sustained spending and settles at a ceiling income and price set.
  *  Derived from the month's flows, so the market reducers stay untouched. */
 function commitWellbeing(ctx: HarnessCtx): void {
   const world = loadWorld(ctx.worldPath);
@@ -200,18 +211,19 @@ function commitWellbeing(ctx: HarnessCtx): void {
         -flow.amount / params.luxuryPrice;
     }
   }
-  // Decay last month's stock first, then add this month's consumption. So a
-  // person who buys one unit a month converges to a steady level of one, not to
-  // zero — the steady state is the sustained consumption rate.
-  const decay = params.wellbeingDecay;
+  // Decay a fraction of last month's stock, then add this month's consumption.
+  // Proportional decay bounds the steady state at about consumption × den/num,
+  // so income and price cap wellbeing instead of it ratcheting up without end.
+  const { num, den } = params.wellbeingDecay;
+  const keep = (x: number) => x - Math.floor((x * num) / den);
   const people = { ...world.people };
   for (const id of Object.keys(people)) {
     const person = people[id];
     if (!person.alive) continue;
     people[id] = {
       ...person,
-      happiness: Math.max(0, person.happiness - decay) + (happy[id] ?? 0),
-      health: Math.max(0, person.health - decay) + (healthy[id] ?? 0),
+      happiness: keep(person.happiness) + (happy[id] ?? 0),
+      health: keep(person.health) + (healthy[id] ?? 0),
     };
   }
   saveWorld(ctx.worldPath, { ...world, people });
@@ -278,7 +290,8 @@ export async function runIgnition(
     commitRemainder(ctx);
     const settled = loadWorld(ctx.worldPath);
     lines.push(lineOf(settled));
-    saveWorld(ctx.worldPath, { ...settled, month: settled.month + 1 });
+    const next = opts.spend ? prune(settled) : settled;
+    saveWorld(ctx.worldPath, { ...next, month: next.month + 1 });
   }
   return lines;
 }

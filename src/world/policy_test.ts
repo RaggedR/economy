@@ -259,8 +259,9 @@ Deno.test("households spend down the objective chain and train toward the archiv
   assertEquals(
     spent.map((row) => `${row.person}:${row.tag}:${"good" in row ? row.good : row.tag}`),
     [
+      // ada buys both nightclub units the supply holds in one order, so ben
+      // gets none.
       "ada:good:nightclub",
-      "ben:good:nightclub",
       "ben:good:luxuryFood",
       "ben:tuition:tuition",
     ],
@@ -284,5 +285,7 @@ Deno.test("households spend down the objective chain and train toward the archiv
   const health = householdSpend(w).filter((row) => row.person === "ada").map((row) =>
     row.tag
   );
+  // Both nightclubs in one order, a luxury, then the cure: one pass down the
+  // chain buys all the supply a richer household can afford.
   assertEquals(health, ["good", "good", "cure"]);
 });

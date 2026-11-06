@@ -57,26 +57,26 @@ Deno.test("both shops keep posting 5 while either has bread left", async () => {
   const dir = Deno.makeTempDirSync({ prefix: "econ-ignite-" });
   const ctx = openRig(dir, townSeed(), seededIds("economy-ignition"), fixedClock());
   const lines = await runIgnition(ctx, 12);
-  const cashMin = [63, 66, 69, 72, 75, 78, 81, 84, 87, 90, 93, 96];
-  const cashMax = [105, 140, 150, 160, 195, 205, 240, 250, 285, 295, 330, 340];
+  const cashMin = [71, 82, 93, 104, 115, 126, 137, 148, 159, 170, 181, 192];
+  const cashMax = [105, 140, 151, 162, 195, 206, 240, 251, 285, 296, 330, 341];
   // Working capital keeps every firm solvent through the year, so nobody folds,
   // every worker is paid, and the household sector gains what the firms pay out
-  // of their year-of-wages float (household + firm cash stay a constant 2360).
+  // of their year-of-wages float (household + firm cash stay a constant 3800).
   const householdCash = [
-    1016,
     1112,
-    1208,
-    1304,
-    1400,
-    1496,
-    1592,
-    1688,
-    1784,
-    1880,
-    1976,
-    2072,
+    1305,
+    1497,
+    1690,
+    1883,
+    2073,
+    2266,
+    2457,
+    2650,
+    2841,
+    3034,
+    3225,
   ];
-  const firmCash = [1344, 1248, 1152, 1056, 960, 864, 768, 672, 576, 480, 384, 288];
+  const firmCash = [2688, 2495, 2303, 2110, 1917, 1727, 1534, 1343, 1150, 959, 766, 575];
   for (let i = 0; i < 12; i++) {
     const line = lines[i];
     assertEquals(line.month, i);

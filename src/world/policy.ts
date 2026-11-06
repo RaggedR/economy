@@ -163,10 +163,11 @@ export function loanAsk(world: World, borrower: Id, bank: BankId): LoanAsk | nul
 //
 // A lender who declines is not asked. Silence is not a shape.
 //
-// A household buys down its objective's chain, one lot at a time, cheapest
-// first. Savings and investment buy none of these goods. Investment's assets
-// are the markets this milestone does not build. A jobless person trains
-// toward the archive career with the most slots.
+// A household buys down its objective's chain, cheapest first, and repeats the
+// chain until it can afford no more — so a richer household reaches a higher
+// steady wellbeing rather than a flat one lot. Savings and investment buy none
+// of these goods. Investment's assets are the markets this milestone does not
+// build. A jobless person trains toward the archive career with the most slots.
 
 const RESERVE_ROWS: readonly FlowRow[] = [
   "wages",
@@ -350,7 +351,7 @@ export type SpendOrder =
     person: Id;
     good: "luxuryFood" | "nightclub";
     listing: Id;
-    qty: 1;
+    qty: Qty;
     reason: string;
   }
   | {
@@ -411,79 +412,97 @@ export function householdSpend(world: World): SpendOrder[] {
   for (const person of byId(Object.keys(world.people)).map((id) => world.people[id])) {
     if (!person.alive) continue;
     cash.set(person.id, cashOf(world, person.id));
-    for (const step of CHAIN[person.objective]) {
-      const have = cash.get(person.id) ?? 0;
-      if (step === "nightclub" || step === "luxuryFood") {
-        const listing = cheapest(
-          world,
-          taken,
-          1,
-          (row) => row.kind === "good" && goodOf(row.payload) === step,
-        );
-        if (!listing || listing.price > have) continue;
-        hold(taken, listing, 1);
-        cash.set(person.id, have - listing.price);
-        const verb = step === "nightclub" ? "a nightclub unit" : "luxury food";
-        orders.push({
-          tag: "good",
-          person: person.id,
-          good: step,
-          listing: listing.id,
-          qty: 1,
-          reason: `${person.id} buys ${verb} for ${person.objective}`,
-        });
-        continue;
-      }
-      if (step === "tuition") {
-        const top = archiveCareer(world);
-        if (!top) continue;
-        const need = params.unitsPerLevel;
-        const listing = cheapest(
-          world,
-          taken,
-          need,
-          (row) => tuitionCareer(row.payload) === top.career,
-        );
-        if (!listing) continue;
-        const cost = listing.price * need;
-        if (!Number.isSafeInteger(cost) || cost > have) continue;
-        hold(taken, listing, need);
-        cash.set(person.id, have - cost);
-        orders.push({
-          tag: "tuition",
-          person: person.id,
-          career: top.career,
-          provider: listing.seller,
-          listing: listing.id,
-          qty: need,
-          reason: `${person.id} trains toward ${top.career}`,
-        });
-        continue;
-      }
-      const diseases = DISEASES.filter((disease) => person.diseases.includes(disease));
-      for (const disease of diseases) {
-        const need = params.cureSize;
-        const listing = cheapest(
-          world,
-          taken,
-          need,
-          (row) => row.kind === "cure" && diseaseOf(row.payload) === disease,
-        );
-        if (!listing) continue;
-        const cost = listing.price * need;
-        if (!Number.isSafeInteger(cost) || cost > have) continue;
-        hold(taken, listing, need);
-        cash.set(person.id, have - cost);
-        orders.push({
-          tag: "cure",
-          person: person.id,
-          disease,
-          provider: listing.seller,
-          listing: listing.id,
-          qty: need,
-          reason: `${person.id} buys a ${disease} cure for health`,
-        });
-        break;
+    // Spend down the chain repeatedly: a richer household buys more of its
+    // objective good and so reaches a higher steady wellbeing, not a flat one
+    // lot. Food is bought before this phase each month, so draining the rest is
+    // safe. A pass that buys nothing ends the loop; capacity and cash bound it.
+    let progress = true;
+    let guard = 0;
+    while (progress && guard++ < 1000) {
+      progress = false;
+      for (const step of CHAIN[person.objective]) {
+        const have = cash.get(person.id) ?? 0;
+        if (step === "nightclub" || step === "luxuryFood") {
+          const listing = cheapest(
+            world,
+            taken,
+            1,
+            (row) => row.kind === "good" && goodOf(row.payload) === step,
+          );
+          if (!listing || listing.price > have) continue;
+          // Buy as many as cash and this listing's stock allow, in one order.
+          // The next pass reaches the next cheapest listing, so the loop runs
+          // once per listing, not once per unit.
+          const left = listing.qty - (taken.get(listing.id) ?? 0);
+          const want = Math.min(left, Math.floor(have / listing.price));
+          if (want < 1) continue;
+          hold(taken, listing, want);
+          cash.set(person.id, have - want * listing.price);
+          const verb = step === "nightclub" ? "nightclub units" : "luxury food";
+          orders.push({
+            tag: "good",
+            person: person.id,
+            good: step,
+            listing: listing.id,
+            qty: want,
+            reason: `${person.id} buys ${verb} for ${person.objective}`,
+          });
+          progress = true;
+          continue;
+        }
+        if (step === "tuition") {
+          const top = archiveCareer(world);
+          if (!top) continue;
+          const need = params.unitsPerLevel;
+          const listing = cheapest(
+            world,
+            taken,
+            need,
+            (row) => tuitionCareer(row.payload) === top.career,
+          );
+          if (!listing) continue;
+          const cost = listing.price * need;
+          if (!Number.isSafeInteger(cost) || cost > have) continue;
+          hold(taken, listing, need);
+          cash.set(person.id, have - cost);
+          orders.push({
+            tag: "tuition",
+            person: person.id,
+            career: top.career,
+            provider: listing.seller,
+            listing: listing.id,
+            qty: need,
+            reason: `${person.id} trains toward ${top.career}`,
+          });
+          progress = true;
+          continue;
+        }
+        const diseases = DISEASES.filter((disease) => person.diseases.includes(disease));
+        for (const disease of diseases) {
+          const need = params.cureSize;
+          const listing = cheapest(
+            world,
+            taken,
+            need,
+            (row) => row.kind === "cure" && diseaseOf(row.payload) === disease,
+          );
+          if (!listing) continue;
+          const cost = listing.price * need;
+          if (!Number.isSafeInteger(cost) || cost > have) continue;
+          hold(taken, listing, need);
+          cash.set(person.id, have - cost);
+          orders.push({
+            tag: "cure",
+            person: person.id,
+            disease,
+            provider: listing.seller,
+            listing: listing.id,
+            qty: need,
+            reason: `${person.id} buys a ${disease} cure for health`,
+          });
+          progress = true;
+          break;
+        }
       }
     }
   }

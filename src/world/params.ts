@@ -98,15 +98,20 @@ export const params = {
    * Twelve times `stapleReservePrice`.
    */
   startingSavings: 60,
-  /** Incumbent wage at t₀, every career. A job-day listing is a later post. */
-  townWage: 8,
+  /**
+   * Incumbent wage at t₀, every career. Raised to the welfare optimum the sweep
+   * found: a higher wage is the non-rival lever — it lifts health, education,
+   * savings and the fed count together, because prices, and so firm revenue,
+   * stay put. A job-day listing is a later post.
+   */
+  townWage: 16,
   /**
    * Cash each firm holds at t₀. A year of wages — the firm's analogue of a
    * person's `startingSavings`, so a firm survives a dry spell instead of
    * folding at the first opening it cannot self-fund. `firmReserveMonths`
    * times `townWage`.
    */
-  firmFloat: 96,
+  firmFloat: 192,
   /**
    * Months of wages a solvent firm retains against the owner draw — its
    * working capital. The draw sweeps only what sits above this reserve, so a
@@ -116,13 +121,14 @@ export const params = {
    */
   firmReserveMonths: 12,
   /**
-   * Wellbeing decays this much each month toward zero. Happiness and health are
-   * a flow, not a stock: a nightclub consumed adds one happiness, luxury food
-   * adds one health, and both erode by this each month. So a person must keep
-   * consuming to hold a level, and income funds a steady state rather than a
-   * one-time climb.
+   * The fraction of wellbeing that decays each month. Happiness and health are a
+   * flow, not a stock: a nightclub consumed adds one happiness, luxury food adds
+   * one health, and a fifth of the standing level erodes each month. Proportional
+   * decay gives a bounded steady state — a sustained consumption of c a month
+   * settles near c × den/num — so income and price set a ceiling on wellbeing,
+   * not an ever-rising floor.
    */
-  wellbeingDecay: 1,
+  wellbeingDecay: { num: 1, den: 5 },
   /** One unit of luxury food. Above staple. No spec default. */
   luxuryPrice: 8,
   /** One nightclub unit. No spec default. */
