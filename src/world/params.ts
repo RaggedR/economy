@@ -141,6 +141,16 @@ export const params = {
    */
   demandLots: 1,
   /**
+   * When > 0, discretionary demand is a budget, not a lot count: each month a
+   * household spends up to this fraction of its cash (after staple) on the
+   * nightclub/luxury steps, buying as many lots as that budget affords at the
+   * going price. This makes demand slope — budget/price lots, so fewer as price
+   * rises — and wealth-scaled: the rich buy many, the poor buy few and keep the
+   * rest as savings. 0 is off: the flat demandLots cap applies (the frozen
+   * default). A fraction is num/den to stay integer-exact.
+   */
+  demandBudgetFraction: { num: 0, den: 1 },
+  /**
    * When true, a continuously produced good (luxury food, nightclub) reposts on
    * the same rule staple uses — cut a leftover shelf, raise a sellout, capped by
    * a cheaper rival — instead of the fixed posted price. Off is the frozen
@@ -158,6 +168,21 @@ export const params = {
    * flag says so. Scarcity is the precondition price discovery actually needs.
    */
   perishable: false,
+  /**
+   * Multiplies every metropolis job salary (the town's incomes). 1 is the frozen
+   * wage spread of 6–14. Above 1 raises purchasing power: the lever the
+   * price-discovery arc points at, since the discovered price deflates when
+   * production capacity outruns what the town can afford. A knob on metropolis
+   * incomes only; the milestone towns do not read it.
+   */
+  metroWageScale: 1,
+  /**
+   * When true, every metropolis producing machine is generation 0 — the weak
+   * machine — instead of the gen-0/gen-1 mix. Lower output per firm, so the
+   * month's supply can sit below demand and the price clears above the floor.
+   * A knob on metropolis supply only; the milestone towns do not read it.
+   */
+  metroWeakMachines: false,
   /** One unit of luxury food. Above staple. No spec default. */
   luxuryPrice: 8,
   /** One nightclub unit. No spec default. */

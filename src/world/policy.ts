@@ -429,28 +429,39 @@ export function householdSpend(world: World): SpendOrder[] {
   const orders: SpendOrder[] = [];
   const taken = new Map<Id, Qty>();
   const cash = new Map<Id, Money>();
+  const budget = new Map<Id, Money>();
+  const frac = params.demandBudgetFraction;
+  const budgeted = frac.num > 0;
   for (const person of byId(Object.keys(world.people)).map((id) => world.people[id])) {
     if (!person.alive) continue;
-    cash.set(person.id, cashOf(world, person.id));
+    const start = cashOf(world, person.id);
+    cash.set(person.id, start);
+    // A month's discretionary budget: a fraction of this person's cash (after
+    // staple). The rich carry a large one and buy many lots; the poor a small
+    // one and buy few, keeping the rest as savings. Shared across the chain's
+    // good steps. Off (fraction 0), the flat demandLots cap governs instead.
+    budget.set(person.id, budgeted ? Math.floor(start * frac.num / frac.den) : 0);
     for (const step of CHAIN[person.objective]) {
       const have = cash.get(person.id) ?? 0;
       if (step === "nightclub" || step === "luxuryFood") {
-        // Elastic demand: buy up to params.demandLots lots this step, cheapest
-        // first, re-reading cash after each. At demandLots = 1 this is one lot —
-        // the frozen pass. Above 1, a buyer keeps buying, so demand can outrun a
-        // seller's shelf and a listing can sell out.
+        // Elastic demand, two shapes. Flat: up to params.demandLots lots (1 is
+        // the frozen pass). Budget: buy lots until the month's budget is spent,
+        // so demand is budget/price — it slopes with price and scales with
+        // wealth. Cheapest first, re-reading cash after each.
         const verb = step === "nightclub" ? "a nightclub unit" : "luxury food";
-        for (let lot = 0; lot < params.demandLots; lot++) {
+        for (let lot = 0; budgeted || lot < params.demandLots; lot++) {
           const left = cash.get(person.id) ?? 0;
+          const ceiling = budgeted ? Math.min(left, budget.get(person.id) ?? 0) : left;
           const listing = cheapest(
             world,
             taken,
             1,
             (row) => row.kind === "good" && goodOf(row.payload) === step,
           );
-          if (!listing || listing.price > left) break;
+          if (!listing || listing.price > ceiling) break;
           hold(taken, listing, 1);
           cash.set(person.id, left - listing.price);
+          if (budgeted) budget.set(person.id, (budget.get(person.id) ?? 0) - listing.price);
           orders.push({
             tag: "good",
             person: person.id,

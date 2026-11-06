@@ -100,7 +100,10 @@ export function metropolisSeed(): World {
   let fi = 0;
   for (const spec of FIRMS) {
     for (let n = 1; n <= spec.count; n++) {
-      const generation = spec.produces && metroHash(fi, 11) < 0.34 ? 1 : 0;
+      const generation = !params.metroWeakMachines && spec.produces &&
+          metroHash(fi, 11) < 0.34
+        ? 1
+        : 0;
       firms.push({
         id: `${spec.prefix}-${String(n).padStart(2, "0")}`,
         kind: spec.kind,
@@ -120,7 +123,7 @@ export function metropolisSeed(): World {
   //    public-firm employees, second workers, then the idle tail.
   const role: string[] = new Array(PEOPLE).fill("idle");
   const jobOf: (Job | null)[] = new Array(PEOPLE).fill(null);
-  const salary = (i: number) => spread(i, 23, 6, 14);
+  const salary = (i: number) => spread(i, 23, 6, 14) * params.metroWageScale;
   let k = 0;
 
   for (const f of firms) {
