@@ -37,6 +37,14 @@ export const params = {
    */
   cutFactor: { num: 1, den: 1 },
   /**
+   * The cut for a discretionary good (luxury, nightclub) under
+   * discretionaryDiscovery, kept separate from staple's cutFactor so a working
+   * cut can find a clearing price for a want without deflating the necessity.
+   * 1/1 holds the price (the frozen default); a fraction like 4/5 lets a
+   * leftover shelf fall until the better-off buyers clear the month's make.
+   */
+  discretionaryCut: { num: 1, den: 1 },
+  /**
    * A cheaper competitor caps the next price at that post times num/den.
    * 1/1 matches. No spec default.
    */
@@ -123,6 +131,33 @@ export const params = {
    * one-time climb.
    */
   wellbeingDecay: 1,
+  /**
+   * Lots a household buys per discretionary step (nightclub, luxury food) each
+   * month. 1 is one pass down the chain — the frozen demand, capped at a single
+   * lot, which pins happiness and health near their consumption rate. Above 1,
+   * demand is elastic: a person buys up to this many lots per step, cash and
+   * shelf permitting, so demand can outrun a seller's supply and a listing can
+   * sell out. The one lever the welfare sweep could not reach.
+   */
+  demandLots: 1,
+  /**
+   * When true, a continuously produced good (luxury food, nightclub) reposts on
+   * the same rule staple uses — cut a leftover shelf, raise a sellout, capped by
+   * a cheaper rival — instead of the fixed posted price. Off is the frozen
+   * market: commitProduce reposts at the param price every month, so the
+   * discretionary price never discovers a level.
+   */
+  discretionaryDiscovery: false,
+  /**
+   * When true, a continuously produced good (luxury food, nightclub) is
+   * perishable: last month's unsold shelf is discarded before this month's make
+   * is posted, so supply is one month's production, not a pile that grows every
+   * month. Off is the frozen market, where unsold stock accumulates without
+   * bound and nothing is ever scarce — so no listing sells out and no price can
+   * rise. A nightclub's empty night and a day's fresh food do not keep; this
+   * flag says so. Scarcity is the precondition price discovery actually needs.
+   */
+  perishable: false,
   /** One unit of luxury food. Above staple. No spec default. */
   luxuryPrice: 8,
   /** One nightclub unit. No spec default. */

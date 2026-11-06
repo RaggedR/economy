@@ -13,6 +13,7 @@ import type {
   Career,
   Disease,
   FlowRow,
+  Good,
   Id,
   Listing,
   Material,
@@ -79,10 +80,10 @@ function scale(price: Money, ratio: { num: number; den: number }): Money {
   return next < 1 ? 1 : next;
 }
 
-function staplePosts(world: World, firmId: Id): Listing[] {
+function goodPosts(world: World, firmId: Id, good: Good): Listing[] {
   return world.listings.filter((listing) =>
     listing.seller === firmId && listing.kind === "good" &&
-    goodOf(listing.payload) === "staple"
+    goodOf(listing.payload) === good
   );
 }
 
@@ -92,17 +93,33 @@ function staplePosts(world: World, firmId: Id): Listing[] {
  *  The listing does not remember its original qty, so any remainder is the
  *  cut. A competitor's latest post, when lower, caps the result at that
  *  post times `undercutFactor`. */
-export function nextStaplePrice(world: World, firmId: Id): Money {
-  const mine = staplePosts(world, firmId);
+/** The reprice rule, for any continuously posted good. From the firm's latest
+ *  listing of that good: none yet keeps `opening`; nothing left sold out, so the
+ *  price multiplies by `raiseFactor`; stock left went unsold, so it multiplies by
+ *  `cutFactor`. A cheaper rival's latest post caps the result at that post times
+ *  `undercutFactor`. Staple and the discretionary goods share this; only the
+ *  opening price and (for discretionary) the `discretionaryDiscovery` switch
+ *  differ. */
+export function nextPostPrice(
+  world: World,
+  firmId: Id,
+  good: Good,
+  opening: Money,
+): Money {
+  const mine = goodPosts(world, firmId, good);
   const last = mine[mine.length - 1];
-  if (!last) return params.stapleReservePrice;
-  const ratio = last.qty > 0 ? params.cutFactor : params.raiseFactor;
+  if (!last) return opening;
+  // Staple cuts by its own (frozen) factor; a want cuts by the discretionary
+  // one, so a leftover shelf can fall toward a clearing level without dragging
+  // the necessity down with it. Both raise by the shared raiseFactor.
+  const cut = good === "staple" ? params.cutFactor : params.discretionaryCut;
+  const ratio = last.qty > 0 ? cut : params.raiseFactor;
   let price = scale(last.price, ratio);
   let cap = price;
   let bound = false;
   for (const other of Object.keys(world.firms).sort()) {
     if (other === firmId) continue;
-    const posts = staplePosts(world, other);
+    const posts = goodPosts(world, other, good);
     const posted = posts[posts.length - 1];
     if (!posted || posted.price >= price) continue;
     const there = scale(posted.price, params.undercutFactor);
@@ -112,6 +129,10 @@ export function nextStaplePrice(world: World, firmId: Id): Money {
     }
   }
   return bound && cap < price ? cap : price;
+}
+
+export function nextStaplePrice(world: World, firmId: Id): Money {
+  return nextPostPrice(world, firmId, "staple", params.stapleReservePrice);
 }
 
 export type LoanAsk = {
@@ -414,24 +435,31 @@ export function householdSpend(world: World): SpendOrder[] {
     for (const step of CHAIN[person.objective]) {
       const have = cash.get(person.id) ?? 0;
       if (step === "nightclub" || step === "luxuryFood") {
-        const listing = cheapest(
-          world,
-          taken,
-          1,
-          (row) => row.kind === "good" && goodOf(row.payload) === step,
-        );
-        if (!listing || listing.price > have) continue;
-        hold(taken, listing, 1);
-        cash.set(person.id, have - listing.price);
+        // Elastic demand: buy up to params.demandLots lots this step, cheapest
+        // first, re-reading cash after each. At demandLots = 1 this is one lot —
+        // the frozen pass. Above 1, a buyer keeps buying, so demand can outrun a
+        // seller's shelf and a listing can sell out.
         const verb = step === "nightclub" ? "a nightclub unit" : "luxury food";
-        orders.push({
-          tag: "good",
-          person: person.id,
-          good: step,
-          listing: listing.id,
-          qty: 1,
-          reason: `${person.id} buys ${verb} for ${person.objective}`,
-        });
+        for (let lot = 0; lot < params.demandLots; lot++) {
+          const left = cash.get(person.id) ?? 0;
+          const listing = cheapest(
+            world,
+            taken,
+            1,
+            (row) => row.kind === "good" && goodOf(row.payload) === step,
+          );
+          if (!listing || listing.price > left) break;
+          hold(taken, listing, 1);
+          cash.set(person.id, left - listing.price);
+          orders.push({
+            tag: "good",
+            person: person.id,
+            good: step,
+            listing: listing.id,
+            qty: 1,
+            reason: `${person.id} buys ${verb} for ${person.objective}`,
+          });
+        }
         continue;
       }
       if (step === "tuition") {

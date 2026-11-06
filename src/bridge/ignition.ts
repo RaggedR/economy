@@ -26,7 +26,12 @@ import type { HarnessCtx } from "./harness.ts";
 import { postGoodGate, postInventoryGate, postTuitionGate } from "../world/gates.ts";
 import { markStarvation, starvationDeaths } from "../world/market.ts";
 import { params } from "../world/params.ts";
-import { archiveCareer, householdSpend, nextStaplePrice } from "../world/policy.ts";
+import {
+  archiveCareer,
+  householdSpend,
+  nextPostPrice,
+  nextStaplePrice,
+} from "../world/policy.ts";
 import { runSpend } from "./spend.ts";
 import { remainderDraws } from "../world/purses.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
@@ -144,16 +149,32 @@ function commitProduce(ctx: HarnessCtx): void {
     const out = firmOutput(world, id);
     if (!out || out.good === "staple") continue;
     const firm = world.firms[id];
-    const have = firm.inventory[out.good] ?? 0;
+    // Fixed param price (the frozen market), or the reprice rule discovering a
+    // level from the last shelf — cut on a leftover, raise on a sellout, capped
+    // by a cheaper rival — opening at the param price the fixed market posts.
+    // Read before any expiry, so the signal is the prior shelf's leftover.
+    const price = params.discretionaryDiscovery
+      ? nextPostPrice(world, id, out.good, priceOf(out.good))
+      : priceOf(out.good);
+    // Perishable: last month's unsold shelf of this good is discarded — its
+    // listings drop and its stock resets — so supply is this month's make, not a
+    // pile. Durable (the default) accumulates, as before.
+    const listings = params.perishable
+      ? world.listings.filter((l) =>
+        !(l.seller === id && l.kind === "good" && goodOf(l.payload) === out.good)
+      )
+      : world.listings;
+    const have = params.perishable ? 0 : (firm.inventory[out.good] ?? 0);
     saveWorld(ctx.worldPath, {
       ...world,
+      listings,
       firms: {
         ...world.firms,
         [id]: { ...firm, inventory: { ...firm.inventory, [out.good]: have + out.qty } },
       },
     });
     const posted = loadWorld(ctx.worldPath);
-    const gated = postInventoryGate(posted, id, out.good, priceOf(out.good), out.qty);
+    const gated = postInventoryGate(posted, id, out.good, price, out.qty);
     if (!gated.ok) throw new Error(gated.reason);
     commitEngine(
       { world: ctx.worldPath, journal: ctx.journalPath },
