@@ -1,7 +1,17 @@
 // seed.ts — the smallest worlds the milestones drive. Domain ids are fields of
 // the world. Log ids are not.
 
-import type { Bank, Career, Deposits, Firm, Person, World } from "./types.ts";
+import type {
+  Bank,
+  Career,
+  Deposits,
+  Firm,
+  Good,
+  Listing,
+  Objective,
+  Person,
+  World,
+} from "./types.ts";
 import { params } from "./params.ts";
 import { CAREERS } from "./types.ts";
 import { assertInvariant } from "./world.ts";
@@ -478,8 +488,6 @@ const TOWN: readonly TownPost[] = [
   },
 ];
 
-const TOWN_WAGE = 8;
-
 export type TownCensus = {
   people: number;
   firms: number;
@@ -513,26 +521,104 @@ export function townCensus(world: World): TownCensus {
   };
 }
 
+function stockGood(
+  world: World,
+  firmId: string,
+  good: Exclude<Good, "tuition">,
+  price: number,
+): void {
+  const qty = params.outputAt0;
+  const firm = world.firms[firmId];
+  firm.inventory = { ...firm.inventory, [good]: qty };
+  world.listings.push({
+    id: `${good}-${firmId}`,
+    seller: firmId,
+    kind: "good",
+    price,
+    qty,
+    payload: { good },
+  });
+}
+
+/** One generation-0 retail oven. Indigenous: it was not bought. The builder is
+ *  tech-1, so the opening maintenance is paid there. */
+function addOven(world: World, firmId: string): World {
+  const id = `m-${firmId}`;
+  const firm = world.firms[firmId];
+  return {
+    ...world,
+    machines: {
+      ...world.machines,
+      [id]: {
+        id,
+        type: "retail",
+        generation: 0,
+        owner: firmId,
+        builder: "tech-1",
+      },
+    },
+    firms: {
+      ...world.firms,
+      [firmId]: { ...firm, machines: [...firm.machines, id] },
+    },
+  };
+}
+
+/** The t₀ price vector that is a listing. Rent, the wage, machines, maintenance,
+ *  and ore stay on `params`: rent has no tenant, and the others are not a
+ *  shop's good. Luxury, nightclub, tuition, and cure are stocked once.
+ *  Staple is not: each supermarket bakes it. */
+function stockShelves(world: World): void {
+  stockGood(world, "lux-1", "luxuryFood", params.luxuryPrice);
+  stockGood(world, "lux-2", "luxuryFood", params.luxuryPrice);
+  stockGood(world, "club-1", "nightclub", params.nightclubPrice);
+  stockGood(world, "club-2", "nightclub", params.nightclubPrice);
+  stockGood(world, "club-3", "nightclub", params.nightclubPrice);
+  const tuition: Listing = {
+    id: "tuition-priv-uni",
+    seller: "priv-uni",
+    kind: "good",
+    price: params.tuitionPrice,
+    qty: params.unitsPerLevel,
+    payload: { good: "tuition", career: "engineer" },
+  };
+  const cure: Listing = {
+    id: "cure-priv-hosp",
+    seller: "priv-hosp",
+    kind: "cure",
+    price: params.curePrice,
+    qty: params.cureSize,
+    payload: { disease: "d0" },
+  };
+  world.listings.push(tuition, cure);
+}
+
 /** t₀. Full employment, every person housed, indigenous mine owners, no
- *  level-1 engineer. Not the month prefix: that prefix still asks Ada. */
+ *  level-1 engineer. Each purse holds `startingSavings`. Prices are posted.
+ *  Not the month prefix: that prefix still asks Ada. */
 export function townSeed(): World {
   const people: Record<string, Person> = {};
   for (const post of TOWN) {
-    const person = makePerson(post.who, 10, 0);
+    const person = makePerson(post.who, params.startingSavings, 0);
     person.dwelling = `h-${post.who}`;
-    person.job = { firm: post.firm, career: post.career, salary: TOWN_WAGE };
+    person.job = { firm: post.firm, career: post.career, salary: params.townWage };
     if (post.owner === post.who) person.firm = post.firm;
     people[post.who] = person;
   }
-  const deposited = Object.keys(people).length * 10;
-  const world = shell(people, deposited, 0);
+  const deposited = Object.keys(people).length * params.startingSavings;
+  let world = shell(people, deposited, 0);
   for (const post of TOWN) {
-    world.firms[post.firm] = firmShell(
-      post.firm,
-      post.owner,
-      { a: 0, b: 0 },
-      post.kind,
+    const oven = post.kind === "supermarket" ? params.maintenance : 0;
+    world = placeFirm(
+      world,
+      firmShell(
+        post.firm,
+        post.owner,
+        { a: params.firmFloat + oven, b: 0 },
+        post.kind,
+      ),
     );
+    if (oven > 0) world = addOven(world, post.firm);
     world.houses[`h-${post.who}`] = {
       id: `h-${post.who}`,
       units: params.houseQuantum,
@@ -574,6 +660,82 @@ export function townSeed(): World {
       depositedAt: null,
       lien: null,
     },
+  };
+  stockShelves(world);
+  assertInvariant(world);
+  return world;
+}
+
+/**
+ * The town with demand. townSeed leaves every person a saver, and a saver's
+ * objective chain is empty, so the twelve non-staple firms have no customer and
+ * fold at the first opening. This variant hands out happiness, health, and
+ * education objectives, whose chains name the nightclub, luxury-food, cure, and
+ * tuition those firms post. The health folk carry d0 so the cure listing has a
+ * buyer, and a jobArchive gives tuition a career to train toward. townSeed is
+ * untouched: the milestone fixtures still see the all-saver town.
+ *
+ * The supply is still the one-shot stock stockShelves posts — no machine bakes
+ * luxury or spins a club — so the revenue lasts only while that inventory does.
+ * Sustained production for the non-staple firms is the next milestone, not this
+ * seed. What this shows is the demand side unfreezing: those firms earn, their
+ * owners draw income, and the month-13 cliff moves or clears.
+ */
+const LIVING_OBJECTIVES: Record<string, Objective> = {
+  // Nightclub buyers.
+  nia: "happiness",
+  ria: "happiness",
+  vic: "happiness",
+  yara: "happiness",
+  doc: "happiness",
+  // Nightclub, then luxury food, then a cure for the disease they carry.
+  omar: "health",
+  tara: "health",
+  wes: "health",
+  // Nightclub, then luxury food, then tuition toward the archive career.
+  pia: "education",
+  uma: "education",
+  xia: "education",
+  // The rest keep saving: quin, sol, zed, teach.
+};
+
+/** The producing non-staple firms and the career that staffs each. A machine of
+ *  this type, worked by the firm's owner, makes the firm's good every month, so
+ *  the shelf refills instead of selling out once. Supermarkets already hold an
+ *  oven from townSeed. */
+const LIVING_MACHINES: Record<string, Career> = {
+  "lux-1": "retail",
+  "lux-2": "retail",
+  "club-1": "hospitality",
+  "club-2": "hospitality",
+  "club-3": "hospitality",
+};
+
+export function livingTownSeed(): World {
+  const world = townSeed();
+  for (const [who, objective] of Object.entries(LIVING_OBJECTIVES)) {
+    world.people[who].objective = objective;
+    if (objective === "health") world.people[who].diseases = ["d0"];
+  }
+  // One generation-0 machine on each producing firm. The builder is indigenous
+  // (not a firm), so the opening maintenance is zero and no money moves — the
+  // machine is an asset, not a purchase.
+  for (const [firmId, type] of Object.entries(LIVING_MACHINES)) {
+    const id = `m-${firmId}`;
+    world.machines[id] = {
+      id,
+      type,
+      generation: 0,
+      owner: firmId,
+      builder: "indigenous",
+    };
+    world.firms[firmId].machines = [...world.firms[firmId].machines, id];
+  }
+  // Tuition only fires toward a career the archive lists. One row is enough:
+  // the policy trains toward the career with the most slots.
+  world.jobArchive = {
+    year: 0,
+    listings: [{ career: "engineer", generation: 0, salary: params.townWage, slots: 3 }],
   };
   assertInvariant(world);
   return world;

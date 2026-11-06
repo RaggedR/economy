@@ -61,8 +61,8 @@ function wagesPaidBy(world: World, firmId: Id): number {
 
 /** After the capital step. Only a firm that met its opening wages is drawn.
  *  The test is the original bill, not the cash left after paying it.
- *  The amount is the entrepreneur's reserve: cash minus last month's
- *  maintenance, tax, and debt service. A reserve of zero draws the purse. */
+ *  The amount is the cash above this month's wage, maintenance, tax, and debt
+ *  service. A reserve of zero draws the purse. */
 export function remainderDraws(world: World): Effect[] {
   const effects: Effect[] = [];
   let cursor = world;

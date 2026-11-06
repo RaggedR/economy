@@ -13,14 +13,54 @@ import {
   loanAsk,
   nextLoanRate,
   nextOrePrice,
+  nextStaplePrice,
   operatingReserve,
   teacherMix,
   trainingBids,
 } from "./policy.ts";
-import { firmShell, healthSeed, monthSeed, placeFirm, purseSeed } from "./seed.ts";
+import {
+  firmShell,
+  healthSeed,
+  monthSeed,
+  placeFirm,
+  purseSeed,
+  townSeed,
+} from "./seed.ts";
 import { applyEffect, markedMineBase } from "./world.ts";
 import { params } from "./params.ts";
 import { remainderDraws } from "./purses.ts";
+
+function staple(seller: string, price: number, qty: number) {
+  return {
+    id: `staple-${seller}-${price}-${qty}`,
+    seller,
+    kind: "good" as const,
+    price,
+    qty,
+    payload: { good: "staple" as const },
+  };
+}
+
+Deno.test("a sell-out raises, unsold bread holds, and a cheaper shop caps it", () => {
+  const bare = townSeed();
+  assertEquals(nextStaplePrice(bare, "shop-1"), params.stapleReservePrice);
+  const sold = {
+    ...bare,
+    listings: [...bare.listings, staple("shop-1", 5, 0)],
+  };
+  assertEquals(nextStaplePrice(sold, "shop-1"), 6);
+  const both = {
+    ...bare,
+    listings: [...bare.listings, staple("shop-1", 5, 0), staple("shop-2", 5, 5)],
+  };
+  assertEquals(nextStaplePrice(both, "shop-1"), 5);
+  assertEquals(nextStaplePrice(both, "shop-2"), 5);
+  const lifted = {
+    ...bare,
+    listings: [...bare.listings, staple("shop-2", 4, 0)],
+  };
+  assertEquals(nextStaplePrice(lifted, "shop-2"), 5);
+});
 
 Deno.test("the rate steps toward the other bank, and once more when stressed", () => {
   const w = monthSeed();
@@ -131,18 +171,23 @@ Deno.test("a tie of disease counts breaks toward d0, and extra staff are not inv
   assertEquals(doctorMix(w).map((row) => row.person), ["doc", "doc2"]);
 });
 
-Deno.test("the entrepreneur leaves the opening bill and draws the rest", () => {
+Deno.test("a firm keeps its year of wages and draws only the surplus", () => {
   let world = purseSeed();
   world = placeFirm(world, firmShell("mill", "cleo", { a: 0, b: 0 }, "tech"));
   world = applyEffect(world, held(payGate(world, "shop", "mill", 30, "maintenance")));
-  assertEquals(operatingReserve(world, "shop"), 30);
+  // The shop worker earns 100, so a year of wages is 1200 — more than the till
+  // holds after the maintenance bill, so the whole purse is retained as working
+  // capital and nothing is drawn.
+  assertEquals(operatingReserve(world, "shop"), 1200);
   assertEquals(operatingReserve(world, "mill"), 0);
-  assertEquals(drawAmount(world, "shop"), 340);
+  assertEquals(drawAmount(world, "shop"), 0);
   const draws = remainderDraws(world);
   assertEquals(
     draws.find((effect) => effect.tag === "draw" && effect.firm === "shop"),
-    { tag: "draw", firm: "shop", owner: "ada", amount: 340 },
+    undefined,
   );
+  // The mill carries no payroll, so its reserve is zero and it draws the
+  // maintenance it just received straight through to its owner.
   assertEquals(
     draws.find((effect) => effect.tag === "draw" && effect.firm === "mill"),
     { tag: "draw", firm: "mill", owner: "cleo", amount: 30 },
