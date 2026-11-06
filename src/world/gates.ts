@@ -371,6 +371,34 @@ export function dividendGate(world: World, bank: BankId): GateResult {
   return ok({ tag: "dividend", bank });
 }
 
+/** A direct ore sale from a mine to a buyer. The mine must be privately held
+ *  (not deposited at, or owned by, a bank), the buyer must be able to fund it,
+ *  and the sale cannot exceed the stock. The money reaches the owner. */
+export function sellOreGate(
+  world: World,
+  mineId: Id,
+  buyer: Id,
+  units: Qty,
+  price: Money,
+): GateResult {
+  const bad = posInt(units, "units") ?? posInt(price, "price");
+  if (bad) return refused(bad);
+  const mine = world.mines[mineId];
+  if (!mine) return refused(`no mine ${mineId}`);
+  if (mine.depositedAt !== null || isBankId(mine.owner)) {
+    return refused(`${mineId} is held by a bank, not for private sale`);
+  }
+  if (mine.owner === buyer) return refused(`${buyer} cannot buy ore from its own mine`);
+  if (!purseOf(world, mine.owner)) return refused(`owner ${mine.owner} has no purse`);
+  if (!purseOf(world, buyer)) return refused(`no purse for ${buyer}`);
+  if (units > mine.stock) return refused(`units ${units} exceed stock ${mine.stock}`);
+  const cost = price * units;
+  if (!Number.isSafeInteger(cost)) return refused("price × units is not a safe integer");
+  const short = funds(world, buyer, cost);
+  if (short) return refused(short);
+  return ok({ tag: "sellOre", mine: mineId, buyer, units, price });
+}
+
 export function seizeGate(world: World, loanId: Id): GateResult {
   const loan = world.loans[loanId];
   if (!loan || loan.kind !== "bank") return refused(`no bank loan ${loanId}`);

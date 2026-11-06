@@ -208,6 +208,33 @@ export const params = {
    * soft landing.
    */
   investMarginHeadroom: 1,
+  /**
+   * Lending day (opt-in, `runIgnition(..., { lend })`). The longest term a
+   * wealthy saver's private loan to an entrepreneur is written over. It caps
+   * the principal a thin revenue can carry (a firm servicing `m` per month
+   * borrows at most `m × term`), so the term, not the want, bounds a risky
+   * loan. Read only when lending is on; the milestone loop never is.
+   */
+  lendTermMonths: 12,
+  /**
+   * Equity day (opt-in, `runIgnition(..., { equity })`). The entrepreneur
+   * mortgages his own house each special month and pays the bank interest of
+   * `floor(principal / equityInterestDivisor)` — the earned profit that turns
+   * the bank's equity positive so a dividend can be paid to the mine-depositing
+   * shareholders. A tenth is a plain, round annual rate. Read only when equity
+   * is on; the milestone loop never is.
+   */
+  equityInterestDivisor: 10,
+  /**
+   * Raw-material input to a machine (opt-in: 0 keeps machines free, so every
+   * milestone fixture and the byte-identical replay are untouched). When > 0, a
+   * tech firm must buy this many units of ore — from an indigenous mine, at the
+   * material's reference price — for each machine it builds on invest day. The
+   * money reaches the mine's owner as income, which is the point: a producing
+   * firm's machine spend passes through the tech firm and lands in a mining
+   * household, to be spent on luxury and entertainment.
+   */
+  machineMaterialUnits: 0,
   /** One unit of luxury food. Above staple. No spec default. */
   luxuryPrice: 8,
   /** One nightclub unit. No spec default. */

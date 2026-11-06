@@ -34,6 +34,8 @@ import {
 } from "../world/policy.ts";
 import { runSpend } from "./spend.ts";
 import { newInvestTracker, observeSellouts, runInvestDay } from "./invest.ts";
+import { runLending } from "./lend.ts";
+import { runEquityDay } from "./equity.ts";
 import { remainderDraws } from "../world/purses.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
 import { bakeStaple, firmOutput, stapleOutput, tuitionOutput } from "../world/tech.ts";
@@ -269,6 +271,16 @@ export type IgnitionOpts = {
   invest?: boolean;
   births?: boolean;
   dividend?: boolean;
+  /** Lending day: wealthy savers lend idle cash to the cash-short firms that
+   *  invest day would otherwise leave stranded. Rides on `invest` (it reads the
+   *  same sellout tracker and funds firms up to invest's floor), which rides on
+   *  `spend`. Off by default. */
+  lend?: boolean;
+  /** Equity day: the propertied class deposits mines for shares, entrepreneurs
+   *  mortgage their houses and pay interest, and the bank's earned profit is
+   *  then paid out as a dividend (pair with `dividend`). The credit sector that
+   *  turns idle wealth into a household income flow. Off by default. */
+  equity?: boolean;
 };
 
 /** Each solvent, share-held bank pays its dividend to the shareholders. Refused
@@ -331,11 +343,23 @@ export async function runIgnition(
     lines.push(lineOf(settled));
     const advanced = settled.month + 1;
     saveWorld(ctx.worldPath, { ...settled, month: advanced });
-    // The special month, in the interface's order: births first (ahead of any
-    // real-estate sale), then the dividend, then the entrepreneurs invest.
+    // The special month, in the canonical order:
+    //   1. bank dividend  — distributes the bank's standing (prior-period)
+    //      earnings, so a household has income in hand before step 2;
+    //   2. children       — the dividend first suspends the need to liquidate
+    //      assets to fund a child;
+    //   3. capital market — equity (mines → shares, and the interest that will
+    //      fund NEXT period's dividend), then private debt (lending to the
+    //      cash-short firms); government debt is not yet built;
+    //   4. real estate    — not yet built;
+    //   5. jobs & machines — invest day (a firm buys a machine, then hires);
+    //   6. rental         — not yet built.
+    // Then the usual turn resumes next month, starting with the opening bill.
     const special = advanced > 0 && advanced % 12 === 0;
-    if (special && opts.births) runSpecialBirths(ctx);
     if (special && opts.dividend) commitDividends(ctx);
+    if (special && opts.births) runSpecialBirths(ctx);
+    if (special && opts.equity) runEquityDay(ctx);
+    if (special && opts.lend && tracker) await runLending(ctx, tracker);
     if (special && tracker) runInvestDay(ctx, tracker);
   }
   return lines;

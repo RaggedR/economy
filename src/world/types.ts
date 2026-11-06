@@ -384,6 +384,11 @@ export type Effect =
   | { tag: "escheat"; person: Id }
   | { tag: "vest"; person: Id; heir: Id }
   | { tag: "depositMine"; mine: Id; bank: BankId; shares: Qty }
+  // A direct raw-material sale from a mine to a buyer: the buyer pays the mine's
+  // owner units × price (row "ore"), and the mine's stock falls by units. Unlike
+  // the bank's ore listing, the money reaches the owner — the indigenous income
+  // that a tech firm's machine-building puts into the economy.
+  | { tag: "sellOre"; mine: Id; buyer: Id; units: Qty; price: Money }
   | { tag: "seize"; loan: Id }
   | { tag: "dividend"; bank: BankId }
   | { tag: "setLoanRate"; bank: BankId; rate: Rate }

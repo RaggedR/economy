@@ -1,0 +1,213 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\setlist{nosep, leftmargin=1.5em, topsep=2pt}
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.6em}{0.5em}
+\titlespacing*{\subsection}{0pt}{1.1em}{0.3em}
+
+\hypersetup{pdftitle={Turns}, pdfauthor={Robin Langer}, pdfborder={0 0 0}}
+
+\title{\textbf{Turns}\\[2pt]\large What each kind of agent does in a month, and once a year}
+\author{Robin Langer}
+\date{7 November 2026}
+
+\begin{document}
+\maketitle
+
+The economy advances one month at a time. Every month runs the \emph{monthly
+turn}. Every twelfth month additionally runs the \emph{annual turn} first, and
+then its monthly turn as usual. Each kind of agent layers its own actions onto a
+common skeleton; this note takes them one at a time. A \textit{status} line flags
+where the running metropolis loop does less than the design describes.
+
+\section{The monthly turn --- a regular citizen}
+
+A citizen who owns neither a firm nor a mine. Within one month, in order:
+
+\begin{enumerate}
+\item \textbf{Income.} If employed, receives his wage when his employer settles
+its bill at the top of the month. A saver or idle citizen receives nothing here.
+\item \textbf{Food.} Buys one unit of staple from the cheapest shop with stock.
+If none can be had, he starves --- and may die.
+\item \textbf{Wants.} Spends down his objective's chain --- nightclub
+(happiness); luxury food then a cure (health); luxury food then tuition
+(education) --- cheapest lot first, up to a budget of a quarter of his cash. A
+\emph{savings}-objective citizen buys nothing here.
+\item \textbf{Wellbeing.} This month's consumption becomes happiness or health;
+last month's level decays.
+\end{enumerate}
+
+That is the whole turn for most of the town. Note the cash cascade: income
+arrives first, he spends from it through the markets, and what he does not spend
+stays as savings.
+
+\section{The entrepreneur's extra turn}
+
+An owner-operator of a producing firm (a shop, a luxury shop, a nightclub). He is
+also a citizen and does everything in \S1. His \emph{firm} adds, across the same
+month:
+
+\begin{itemize}
+\item \textbf{Opening (first).} The firm pays its bill: wages to its workers ---
+himself included, which is where he collects his own wage as a citizen ---
+machine maintenance, tax, and debt service (bank and private). If it cannot pay,
+it folds. \emph{This is why income appears first in \S1: it is the firms paying
+out.}
+\item \textbf{Production.} The firm refills its shelf from its machine and its
+crew, prices by the discovery rule (raise on a sellout, cut on a leftover, capped
+by a cheaper rival), and posts the goods.
+\item \textbf{Sales.} Citizens buy from the shelf during the month's markets; the
+takings accrue to the firm.
+\item \textbf{Remainder (last).} The \emph{draw}: the firm's cash above its
+operating reserve is swept to him. This is his income as an owner, and it lands
+at the very end of the month, after the markets have cleared.
+\end{itemize}
+
+So wages leave the firm first and the owner's draw is taken last; in between, the
+households spend the wages back into the shops. His \emph{annual} extra actions
+(investing in a machine, mortgaging his house) belong to the annual turn, \S7.
+
+\section{The miner's extra turn}
+
+A citizen who owns a mine --- a source of ore. Besides the citizen turn:
+
+\begin{itemize}
+\item \textbf{Sells ore} to a tech firm that needs raw material to build a
+machine. The buyer pays the miner directly --- this is the miner's income --- and
+the mine's stock falls by what it sold. The money reaching the owner (rather than
+a bank) is the whole point: it is a producing firm's machine spend, passed through
+the tech firm, landing in a mining household to be spent on luxury and
+entertainment.
+\item \textbf{Or, once a year, deposits the mine} at the bank for shares (a claim
+on dividends). But a deposited mine belongs to the bank and can no longer sell
+ore. So the miner chooses between a raw-material \emph{income flow} and an
+\emph{equity claim}.
+\end{itemize}
+
+\section{The tech firm's extra turn}
+
+A tech firm makes the machines that producing firms expand with. Its activity has
+three parts: \textbf{buy} raw material (ore) from miners; \textbf{build} machines,
+consuming that ore; and \textbf{sell} finished machines to producing firms. The
+sale happens only at the year-end, because capacity is added once a year.
+
+\subsection{Monthly or annual raw material? The coherent answer}
+
+The awkward middle --- buy ore every \emph{month} but build only at \emph{year-end}
+--- is indeed wrong: it would stockpile ore for a year with nothing built to show
+for it. Two coherent designs:
+
+\begin{itemize}
+\item \textbf{(Recommended) Build through the year, sell at year-end.} Tech buys
+ore \emph{as it builds}, month by month, and holds the finished machines as
+inventory until the year-end sale. Ore purchase \,=\, building \,=\, monthly and
+smooth; the miner earns a steady monthly income; only the \emph{sale} is annual.
+\item \textbf{(Current simplification) Everything at year-end.} Tech buys the ore,
+builds, and sells in a single step at the year-end. The miner's ore income is then
+one annual lump.
+\end{itemize}
+
+The recommended design is both more realistic and better for demand: a steady
+monthly income to the indigenous is spent steadily, rather than arriving in a lump
+that then drains away. The running loop currently does the simplification.
+
+\section{The bank's turn}
+
+\begin{itemize}
+\item \textbf{Monthly.} The bank earns: when a borrower settles the debt line of
+his bill, the interest he pays raises the bank's equity (principal repayment does
+not --- it just retires the loan). It also keeps its posted loan rate moving by
+the scripted rule (a step toward the other bank's rate, a step up when stressed).
+\item \textbf{Annually.} On the special month the bank \emph{lends} --- an
+entrepreneur mortgages his house and the bank advances the principal; \emph{mints
+shares} when a miner deposits a mine; and \emph{pays a dividend}, distributing its
+standing equity to shareholders in proportion to their shares.
+\end{itemize}
+
+\noindent\textit{Status.} The bank's genesis equity is minus the whole money
+supply (a pure deposit ledger with no reserve asset), so until that balance sheet
+is changed, interest income cannot lift equity positive and the dividend never
+actually pays. See \texttt{before-the-bank.pdf}.
+
+\section{The government's turn}
+
+\begin{itemize}
+\item \textbf{Monthly.} Collects tax (each firm remits its tax in the opening
+bill) and meets the payroll of the public firms it owns (the public universities
+and hospitals), whose wages flow out in those firms' opening bills. Through its
+public staff it supplies services --- doctors pointed at the diseases people hold,
+teachers at the careers with listed slots.
+\item \textbf{Annually.} May issue government debt in the capital market ---
+borrowing from savers against future tax --- as a channel of its own.
+\end{itemize}
+
+\noindent\textit{Status.} In the running metropolis loop the government is
+passive: tax is collected and public payroll is met through the opening bill, but
+the active public-service assignment and government debt, though present in the
+engine, are not yet driven here.
+
+\section{The annual turn, and how it interleaves}
+
+Every twelfth month is special. At the boundary into that month --- after the
+previous month has fully settled, before the special month's own monthly turn
+begins --- the annual turn runs, in this order:
+
+\begin{enumerate}
+\item \textbf{Bank dividend.} The bank distributes its standing earnings to
+shareholders, so a household has income in hand before the next step.
+\item \textbf{Children.} Households that can afford it bear a child; having the
+dividend first suspends the need to liquidate assets to fund one.
+\item \textbf{Capital market.} Equity (miners deposit mines for shares;
+entrepreneurs mortgage houses and pay interest), then private debt (savers lend to
+cash-short firms), then government debt.
+\item \textbf{Real estate.} Houses change hands.
+\item \textbf{Jobs and machines.} Tech sells its machines; a producing firm that
+has been selling out, clears the margin, and can staff a machine buys one and
+hires its crew.
+\item \textbf{Rental.} Dwellings are let.
+\end{enumerate}
+
+Then the ordinary monthly turn for that month proceeds exactly as in \S1--\S4,
+starting again with the opening bill and food.
+
+\medskip
+\noindent So the shape of time is:
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{An ordinary month} & monthly turn \\
+\textbf{A year-boundary month} & \textbf{annual turn}, then monthly turn \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The annual turn reads the world as it stood at the close of the previous
+month and sets up the capacity, demographics, and capital positions that the
+special month --- and the eleven months after it --- then play out. Under the
+recommended tech design (\S4.1) the ore-consuming \emph{building} happens every
+month, while only the machine \emph{sale} sits in step~5 of the annual turn;
+under the current simplification, building and the ore purchase sit there too.
+
+\section{Implementation status at a glance}
+
+Driven in the running loop: the monthly turn (\S1), the firm's opening bill,
+production, and draw (\S2), invest day and --- behind flags --- private lending,
+mine deposits, mortgages, interest, and the dividend attempt (\S7, steps 3 and 5).
+
+Present in the engine but not yet driven in this loop: the real-estate market
+(\S7.4), the rental market (\S7.6), government debt (\S6, \S7.3), the mining-land
+trade, and monthly tech building (\S4.1). The dividend is driven but
+accounting-blocked (\S5).
+
+\end{document}

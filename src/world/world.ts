@@ -990,6 +990,28 @@ function applyBare(world: World, effect: Effect): { world: World; lines: FlowEnt
       };
       return { world: next, lines: [] };
     }
+    case "sellOre": {
+      const mine = world.mines[effect.mine];
+      if (!mine) throw new LeakError(`no mine ${effect.mine}`);
+      if (effect.units <= 0 || effect.units > mine.stock) {
+        throw new LeakError(`sellOre units ${effect.units} exceed stock ${mine.stock}`);
+      }
+      const cost = effect.price * effect.units;
+      if (!Number.isSafeInteger(cost) || cost <= 0) {
+        throw new LeakError(`ore price × units ${cost} is not a positive safe integer`);
+      }
+      const owner = mine.owner;
+      // Buyer pays the owner for the ore; the mine's stock falls by what it sold.
+      let next = payAcrossHolders(world, effect.buyer, owner, cost);
+      next = {
+        ...next,
+        mines: {
+          ...next.mines,
+          [mine.id]: { ...mine, stock: mine.stock - effect.units },
+        },
+      };
+      return { world: next, lines: pair(month, "ore", effect.buyer, owner, cost) };
+    }
     case "dividend": {
       const bank = world.banks[effect.bank];
       const shares = Object.values(world.shares)

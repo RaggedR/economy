@@ -13,7 +13,7 @@ import { runIgnition } from "./ignition.ts";
 import { newInvestTracker, runInvestDay } from "./invest.ts";
 import { fixedClock, seededIds } from "../log/ids.ts";
 import { metropolisSeed } from "../world/metropolis.ts";
-import { loadWorld } from "../world/store.ts";
+import { loadWorld, saveWorld } from "../world/store.ts";
 import { params } from "../world/params.ts";
 
 function openMetro(dir: string) {
@@ -102,6 +102,48 @@ Deno.test("invest day: supermarket and luxury shop invest too, on one retail mac
   // the vendor was paid for both machines; four idle people became retail crew
   assertEquals(firmCash(after, vendor), vendorCashBefore + 2 * params.machinePrice);
   assertEquals(idleCount(after), idleBefore - 4);
+});
+
+Deno.test("invest day: with machineMaterialUnits on, a machine's ore is bought from an indigenous mine", async () => {
+  const ctx = openMetro("demo-out/invest-test-ore");
+  await runIgnition(ctx, 1, { spend: true });
+
+  // an indigenous mine owner (a person who runs no producing firm)
+  const w1 = loadWorld(ctx.worldPath);
+  const owner = Object.keys(w1.people).filter((id) =>
+    !Object.values(w1.firms).some((f) =>
+      f.owner === id && ["supermarket", "luxury", "nightclub"].includes(f.kind)
+    )
+  ).sort()[0];
+  const club = Object.keys(w1.firms).filter((id) => w1.firms[id].kind === "nightclub").sort()[0];
+  // give that owner a mine
+  w1.mines["m-ore"] = { id: "m-ore", material: "common", stock: 100, owner, depositedAt: null, lien: null };
+  saveWorld(ctx.worldPath, w1);
+
+  const unitsWas = params.machineMaterialUnits;
+  const priceWas = params.machinePrice;
+  try {
+    params.machineMaterialUnits = 5; // a machine needs 5 units of ore
+    params.machinePrice = 100; // the firm's payment covers the 5×10=50 ore cost
+    const before = loadWorld(ctx.worldPath);
+    const ownerCashBefore = before.people[owner].deposits.a + before.people[owner].deposits.b;
+
+    const tracker = newInvestTracker();
+    tracker.history[club] = Array.from({ length: params.investWindow }, () => 1);
+    const tally = runInvestDay(ctx, tracker);
+    assertEquals(tally.bought, 1);
+
+    const after = loadWorld(ctx.worldPath);
+    // the mine gave up 5 units, and its owner was paid 5 × refPrice(common=10) = 50
+    assertEquals(after.mines["m-ore"].stock, 95);
+    assertEquals(
+      after.people[owner].deposits.a + after.people[owner].deposits.b,
+      ownerCashBefore + 50,
+    );
+  } finally {
+    params.machineMaterialUnits = unitsWas;
+    params.machinePrice = priceWas;
+  }
 });
 
 Deno.test("invest day: no sellouts on record, nothing happens", async () => {
