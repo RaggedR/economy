@@ -6,9 +6,15 @@ sustained purchasing power must be a *flow from production into households*. The
 handover named "build the credit sector" as the next step. This arc built three
 ways to mobilise idle wealth into a household income flow, measured each, and
 found which actually creates demand. All additive behind flags; **193 tests pass
-and the byte-identical replay holds.** Nothing committed yet (Robin's call).
+and the byte-identical replay holds.**
 
-See `before-the-bank.pdf` (`before-the-bank.tex`) for the written narrative.
+**Committed and pushed:** `3ca6e1b` "Switch on the bank: lending, equity, and
+raw-material income" on `origin/price-discovery` (RaggedR/economy, not a fork).
+No PR opened yet. The branch is unmerged to `main`.
+
+See `before-the-bank.pdf` for the written narrative of the demand-deficiency arc,
+and `turns.pdf` for the per-agent turn structure (citizen, entrepreneur, miner,
+tech, bank, government) and the annual/monthly interleaving.
 
 ## The three channels (all opt-in, default off)
 
@@ -83,11 +89,41 @@ machines with no raw-material input unless `machineMaterialUnits > 0`.
 ## New params (all frozen-safe defaults)
 `lendTermMonths` (12), `equityInterestDivisor` (10), `machineMaterialUnits` (0).
 
-## Open next steps
-- Fix the bank balance sheet so the dividend can fire (reserve asset backing
-  deposits → genesis equity ≈ 0), then measure dividends + mortgages together.
-- Spread `oreSupplier` across owners / target consumers if ore income
-  concentrates on savings-objective (non-spending) owners.
-- Build the missing markets: mining-land / ore trade, real estate, rental.
-- Scratch harnesses (NOT committed): `lend-compare.ts`, `equity-compare.ts`,
-  `rawmat-compare.ts`.
+## The finding that should steer the next instance
+
+The town is **near full employment (idle ≈ 2) AND demand-deficient at the same
+time** — the paradox of thrift. Income leaks out of circulation (the ¾ saving
+rate, the ~20% with the `savings` objective who buy nothing, firm reserves)
+faster than production returns it. Two consequences that every future lever
+should be judged against:
+
+1. **A demand lever only works by *un-leaking a frozen stock* back into the spend
+   stream.** Redistribution between equal-propensity spenders is demand-neutral;
+   added supply is useless in a demand-short town; a one-off stock gift depletes.
+2. **Magnitude must be comparable to the money supply (~26k).** Real-estate
+   credit mobilised ~31k and moved demand (luxury 2→6); ore flows were ~1.1k and
+   did nothing. Production-linked flows (ore, machine purchases) are structurally
+   small because machine-building is labour-capped — so they can't be the answer.
+
+## Live directions (pick one)
+- **Fix the bank balance sheet** so the dividend can fire *at scale* (reserve
+  asset backing deposits → genesis equity ≈ 0). The dividend recirculates hoards;
+  it's the natural second large lever after real-estate credit. Measure dividends
+  + mortgages together, 48–60 months.
+- **Switch tech to monthly building** (turns.pdf §4.1): build through the year
+  consuming ore monthly, sell machines only at year-end — smoother indigenous
+  income. A refactor of the year-end bundle in `runInvestDay`.
+- **Attack the leak directly** — model a lower savings propensity, make the
+  `savings`-objective consume, or circulate firm reserves. This is the root
+  cause; everything else is downstream.
+- **Build the missing markets** the turns doc names: real estate, rental,
+  mining-land / ore trade, government debt.
+
+## Housekeeping for the next instance
+- `oreSupplier` takes the lowest-id mine first, so ore income concentrates on one
+  owner; spread it (or target consumers) if the raw-material channel is revisited.
+- Scratch harnesses used for the measurements (NOT committed, in the session
+  scratchpad): `lend-compare.ts`, `equity-compare.ts`, `rawmat-compare.ts`. They
+  seed a landed/mined metropolis and A/B a flag; re-create from the committed
+  `metropolis-invest.ts` pattern if needed.
+- No PR yet. If shipping to `main`, open one off `price-discovery`.
