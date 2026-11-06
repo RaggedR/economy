@@ -387,6 +387,28 @@ export function firmOutput(
   return made > 0 ? { good, qty: made } : null;
 }
 
+/** Tuition units a private university trains this month. Teacher operators staff
+ *  teacher machines, output(teacher, generation) each. The same shape as
+ *  stapleOutput, for a good that posts with a career rather than a shelf lot. */
+export function tuitionOutput(world: World, firmId: Id): Qty {
+  const firm = world.firms[firmId];
+  if (!firm || firm.folded || firm.kind !== "privateUniversity") return 0;
+  const workers =
+    Object.values(world.people).filter((person) =>
+      person.alive && person.job?.firm === firmId && person.job.career === "teacher"
+    ).length;
+  let left = workers;
+  let made = 0;
+  for (const machine of held(world, firm, "teacher")) {
+    const need = ops("teacher", machine.generation);
+    const take = Math.min(need, left);
+    if (take <= 0) break;
+    made += Math.floor(output("teacher", machine.generation) * take / need);
+    left -= take;
+  }
+  return made;
+}
+
 export function bakeStaple(world: World): World {
   let firms = world.firms;
   for (const firmId of Object.keys(world.firms).sort()) {

@@ -709,6 +709,7 @@ const LIVING_MACHINES: Record<string, Career> = {
   "club-1": "hospitality",
   "club-2": "hospitality",
   "club-3": "hospitality",
+  "priv-uni": "teacher",
 };
 
 export function livingTownSeed(): World {

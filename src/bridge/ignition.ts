@@ -23,14 +23,14 @@ import { commitDeath } from "./kin.ts";
 import { commitOpening } from "./scheduler.ts";
 import { runStaple, type StapleBid } from "./staple.ts";
 import type { HarnessCtx } from "./harness.ts";
-import { postGoodGate, postInventoryGate } from "../world/gates.ts";
+import { postGoodGate, postInventoryGate, postTuitionGate } from "../world/gates.ts";
 import { markStarvation, starvationDeaths } from "../world/market.ts";
 import { params } from "../world/params.ts";
-import { householdSpend, nextStaplePrice } from "../world/policy.ts";
+import { archiveCareer, householdSpend, nextStaplePrice } from "../world/policy.ts";
 import { runSpend } from "./spend.ts";
 import { remainderDraws } from "../world/purses.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
-import { bakeStaple, firmOutput, stapleOutput } from "../world/tech.ts";
+import { bakeStaple, firmOutput, stapleOutput, tuitionOutput } from "../world/tech.ts";
 import { type Good, goodOf, type World } from "../world/types.ts";
 
 export type MonthLine = {
@@ -154,6 +154,24 @@ function commitProduce(ctx: HarnessCtx): void {
     });
     const posted = loadWorld(ctx.worldPath);
     const gated = postInventoryGate(posted, id, out.good, priceOf(out.good), out.qty);
+    if (!gated.ok) throw new Error(gated.reason);
+    commitEngine(
+      { world: ctx.worldPath, journal: ctx.journalPath },
+      gated.effect,
+      ctx.ids,
+      ctx.clock,
+    );
+  }
+  // The private university trains toward the archive career, continuously, so
+  // education ratchets up instead of stopping after the opening listing. Tuition
+  // is a service: its capacity is this month's teacher output, posted directly.
+  const career = archiveCareer(loadWorld(ctx.worldPath))?.career;
+  if (!career) return;
+  for (const id of firmIds) {
+    const world = loadWorld(ctx.worldPath);
+    const n = tuitionOutput(world, id);
+    if (n <= 0) continue;
+    const gated = postTuitionGate(world, id, career, params.tuitionPrice, n);
     if (!gated.ok) throw new Error(gated.reason);
     commitEngine(
       { world: ctx.worldPath, journal: ctx.journalPath },
