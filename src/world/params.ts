@@ -101,6 +101,14 @@ export const params = {
    */
   cashGift: 60,
   /**
+   * Cash a newborn receives on the special month, transferred from the parent
+   * (who must hold at least this much to fund the child). Defaults to `cashGift`
+   * — one year of staple, the frozen gift — kept as its own knob so the town can
+   * endow children more generously (making the baby boom add demand, not just
+   * labour) without moving the fertility thresholds, which are multiples of G.
+   */
+  birthEndowment: 60,
+  /**
    * Deposits each person holds at t₀. The same year of staple as `cashGift`,
    * named apart so a sweep can move the adult purse without moving the gift.
    * Twelve times `stapleReservePrice`.
@@ -183,6 +191,23 @@ export const params = {
    * A knob on metropolis supply only; the milestone towns do not read it.
    */
   metroWeakMachines: false,
+  /**
+   * Invest day (opt-in, `runIgnition(..., { invest })`). A nightclub that sold
+   * out at least this many of the trailing `investWindow` months has made the
+   * demand case to add a machine. 6 of 12 is a persistent, not a one-off,
+   * sellout. Read only when invest is on; the milestone loop never is.
+   */
+  investTriggerSellouts: 6,
+  /** Months of sellout history the trigger looks back over. A year. */
+  investWindow: 12,
+  /**
+   * Units of price a firm demands above the crew's break-even before it buys.
+   * The break-even is where a full machine's output just covers its operators;
+   * one unit of headroom keeps the firm from expanding into a price its own new
+   * supply would push below cost — the guard that turns the boom-bust into a
+   * soft landing.
+   */
+  investMarginHeadroom: 1,
   /** One unit of luxury food. Above staple. No spec default. */
   luxuryPrice: 8,
   /** One nightclub unit. No spec default. */

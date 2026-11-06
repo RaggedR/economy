@@ -2,7 +2,7 @@
 // A month with nobody over the line and nobody dead writes nothing.
 
 import { commitEngine } from "../cli/econ.ts";
-import { holdsEstate, planBirths, planEstate } from "../world/kin.ts";
+import { holdsEstate, planBirths, planEstate, planSpecialBirths } from "../world/kin.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
 import type { Id } from "../world/types.ts";
 import type { HarnessCtx } from "./harness.ts";
@@ -17,6 +17,18 @@ export function runBirths(ctx: HarnessCtx): void {
   for (const effect of effects) {
     commitEngine(paths(ctx), effect, ctx.ids, ctx.clock);
   }
+}
+
+/** The special month's births (mandatory, and voluntary when exercised). The
+ *  first thing the special month does, ahead of any real-estate sale, so a
+ *  parent's child is split off before holdings can trade. Returns how many were
+ *  born, for the caller to log. */
+export function runSpecialBirths(ctx: HarnessCtx, exerciseVoluntary = true): number {
+  const effects = planSpecialBirths(loadWorld(ctx.worldPath), exerciseVoluntary);
+  for (const effect of effects) {
+    commitEngine(paths(ctx), effect, ctx.ids, ctx.clock);
+  }
+  return effects.length;
 }
 
 /** Seize, route, then the death mark. The draw, if there is one, is saved first. */

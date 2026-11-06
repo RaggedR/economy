@@ -103,6 +103,61 @@ export function planBirths(world: World): Effect[] {
   return effects;
 }
 
+export type BirthBand = "mandatory" | "voluntary" | "none";
+
+/** The special-month fertility bands, as the town's rule states them. A parent
+ *  with `fertilityUnits` of real estate and `fertilityMultiple`×G liquid MUST
+ *  split off a child; one with `fertilityLiquidMultiple` quanta of real estate
+ *  (30 = 3×`houseQuantum`) and `fertilityLiquidMultiple`×G liquid MAY. Either
+ *  way the child is endowed with one quantum of house and one gift of cash
+ *  (`bear`), so a parent qualifies only if it can fund that — a spare quantum to
+ *  subdivide and at least one G of cash. Kept apart from `fertility`/`planBirths`,
+ *  which the milestone town rides unchanged. */
+export function specialBirthBand(world: World, personId: Id): BirthBand {
+  const person = world.people[personId];
+  if (!person || !person.alive) return "none";
+  const units = ownedUnits(world, personId);
+  const cash = depositCash(world, personId);
+  const spare = spareUnits(world, personId);
+  // Cannot endow a child: no spare quantum to give, or not enough cash to fund
+  // the newborn's endowment.
+  if (spare < params.houseQuantum || cash < params.birthEndowment) return "none";
+  if (
+    units >= params.fertilityUnits &&
+    cash >= params.fertilityMultiple * params.cashGift
+  ) {
+    return "mandatory";
+  }
+  const voluntaryUnits = params.fertilityLiquidMultiple * params.houseQuantum; // 30
+  const voluntaryCash = params.fertilityLiquidMultiple * params.cashGift; // 3G
+  if (units >= voluntaryUnits && cash >= voluntaryCash) return "voluntary";
+  return "none";
+}
+
+/** The special month's births, the first thing that happens. Every mandatory
+ *  parent splits off a child; when `exerciseVoluntary`, every voluntary parent
+ *  takes the option too. Sequential in id order, so a parent's own split is
+ *  reflected before the next is judged. Reuses the `birth` effect, so the child
+ *  is endowed exactly as `bear` endows it — one quantum of real estate and one
+ *  G of cash, liquidated from the parent. */
+export function planSpecialBirths(world: World, exerciseVoluntary: boolean): Effect[] {
+  const effects: Effect[] = [];
+  let cursor = world;
+  const ids = Object.values(world.people)
+    .filter((person) => person.alive)
+    .map((person) => person.id)
+    .sort();
+  for (const id of ids) {
+    const band = specialBirthBand(cursor, id);
+    if (band === "mandatory" || (band === "voluntary" && exerciseVoluntary)) {
+      const effect: Effect = { tag: "birth", parent: id };
+      effects.push(effect);
+      cursor = applyEffect(cursor, effect);
+    }
+  }
+  return effects;
+}
+
 function ownedHouses(world: World, owner: Id): House[] {
   return byId(Object.values(world.houses).filter((house) => house.owner === owner));
 }

@@ -273,3 +273,62 @@ Deno.test("two homeless recipients draw, and a bare death still refuses twice", 
   assertEquals(next.people.ben.dwelling, null);
   assertThrows(() => applyEffect(next, { tag: "death", person: "ada" }));
 });
+
+// --- special-month births (the town's two-tier rule) ---
+import { planSpecialBirths, specialBirthBand } from "./kin.ts";
+
+/** kinSeed, but ben holds `units` of real estate and `cash` liquid, with bank a
+ *  balanced so the world stays lawful. ada stays the mandatory parent. */
+function withBen(units: number, cash: number): World {
+  const world = kinSeed();
+  world.houses["h-ben"] = { ...world.houses["h-ben"], units };
+  const was = world.people.ben.deposits.a;
+  world.people.ben.deposits = { a: cash, b: 0 };
+  // Liabilities are stored negative, and equity = loans + deposits + interbank,
+  // so a bigger deposit drops the bank's equity by the same amount.
+  world.banks.a.depositLiability -= cash - was;
+  world.banks.a.equity -= cash - was;
+  assertInvariant(world);
+  return world;
+}
+
+Deno.test("special birth band: mandatory at fertilityUnits + fertilityMultiple·G", () => {
+  const world = kinSeed(); // ada: 100 units, 10G cash
+  assertEquals(specialBirthBand(world, "ada"), "mandatory");
+  assertEquals(specialBirthBand(world, "ben"), "none"); // 10 units, no cash
+  assertEquals(specialBirthBand(world, "cleo"), "none"); // no house
+});
+
+Deno.test("special birth band: voluntary at 3·quantum units + 3·G, not below", () => {
+  const units = params.fertilityLiquidMultiple * params.houseQuantum; // 30
+  const cash = params.fertilityLiquidMultiple * params.cashGift; // 3G
+  assertEquals(specialBirthBand(withBen(units, cash), "ben"), "voluntary");
+  // one quantum short of the real-estate bar (units are multiples of the quantum)
+  assertEquals(specialBirthBand(withBen(units - params.houseQuantum, cash), "ben"), "none");
+  assertEquals(specialBirthBand(withBen(units, cash - 1), "ben"), "none"); // 3G − 1
+});
+
+Deno.test("special birth band: a parent who cannot fund a child is none", () => {
+  // 100 units but under one gift of cash: cannot endow, so not even mandatory.
+  assertEquals(specialBirthBand(withBen(params.fertilityUnits, params.birthEndowment - 1), "ben"), "none");
+});
+
+Deno.test("planSpecialBirths: mandatory always, voluntary only when exercised", () => {
+  const units = params.fertilityLiquidMultiple * params.houseQuantum;
+  const cash = params.fertilityLiquidMultiple * params.cashGift;
+  const world = withBen(units, cash); // ada mandatory, ben voluntary
+  assertEquals(planSpecialBirths(world, false).length, 1); // ada only
+  assertEquals(planSpecialBirths(world, true).length, 2); // ada + ben
+});
+
+Deno.test("special birth endows the child with a quantum of house and a gift of cash", () => {
+  const world = kinSeed();
+  const [effect] = planSpecialBirths(world, true);
+  const after = applyEffect(world, effect);
+  const child = after.people.ada.children.at(-1)!;
+  const units = Object.values(after.houses)
+    .filter((h) => h.owner === child).reduce((s, h) => s + h.units, 0);
+  assertEquals(units, params.houseQuantum); // 10 real estate
+  assertEquals(depositCash(after, child), params.birthEndowment); // one G
+  assertInvariant(after); // the split kept the books lawful
+});

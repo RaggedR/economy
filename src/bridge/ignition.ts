@@ -19,11 +19,11 @@
 // orders, and no hiring; those markets are built but not driven here.
 
 import { commitEngine } from "../cli/econ.ts";
-import { commitDeath } from "./kin.ts";
+import { commitDeath, runSpecialBirths } from "./kin.ts";
 import { commitOpening } from "./scheduler.ts";
 import { runStaple, type StapleBid } from "./staple.ts";
 import type { HarnessCtx } from "./harness.ts";
-import { postGoodGate, postInventoryGate, postTuitionGate } from "../world/gates.ts";
+import { dividendGate, postGoodGate, postInventoryGate, postTuitionGate } from "../world/gates.ts";
 import { markStarvation, starvationDeaths } from "../world/market.ts";
 import { params } from "../world/params.ts";
 import {
@@ -33,6 +33,7 @@ import {
   nextStaplePrice,
 } from "../world/policy.ts";
 import { runSpend } from "./spend.ts";
+import { newInvestTracker, observeSellouts, runInvestDay } from "./invest.ts";
 import { remainderDraws } from "../world/purses.ts";
 import { loadWorld, saveWorld } from "../world/store.ts";
 import { bakeStaple, firmOutput, stapleOutput, tuitionOutput } from "../world/tech.ts";
@@ -259,8 +260,32 @@ function commitBake(ctx: HarnessCtx): void {
 
 /** Options on the opening loop. `spend` runs the objective chain after staple,
  *  the way the full scheduler does, so the non-staple firms get a customer. Off
- *  by default: the milestone ignition is staple-only. */
-export type IgnitionOpts = { spend?: boolean };
+ *  by default: the milestone ignition is staple-only. `invest` adds the
+ *  restricted annual invest day (machines + hiring only) on top of `spend`;
+ *  off by default, so every milestone fixture and the byte-identical replay are
+ *  the staple/living loop they always were. */
+export type IgnitionOpts = {
+  spend?: boolean;
+  invest?: boolean;
+  births?: boolean;
+  dividend?: boolean;
+};
+
+/** Each solvent, share-held bank pays its dividend to the shareholders. Refused
+ *  — negative equity or no shares outstanding — is a quiet skip, not an error.
+ *  A bank with no earned profit (no loans, no interest) never pays. */
+function commitDividends(ctx: HarnessCtx): void {
+  for (const bank of ["a", "b"] as const) {
+    const gate = dividendGate(loadWorld(ctx.worldPath), bank);
+    if (!gate.ok) continue;
+    commitEngine(
+      { world: ctx.worldPath, journal: ctx.journalPath },
+      gate.effect,
+      ctx.ids,
+      ctx.clock,
+    );
+  }
+}
 
 /** `months` openings. Each one bakes before the bids, then draws. The month
  *  counter advances after the draw, so line 0 is the first opening. With
@@ -276,6 +301,10 @@ export async function runIgnition(
     throw new Error("months must be a positive integer");
   }
   const lines: MonthLine[] = [];
+  // Invest day rides on spend: nightclubs only sell, and so only sell out, when
+  // the discretionary pass runs. The tracker spans the whole call.
+  const invest = !!(opts.invest && opts.spend);
+  const tracker = invest ? newInvestTracker() : null;
   for (let i = 0; i < months; i++) {
     commitOpening(ctx);
     commitBake(ctx);
@@ -296,10 +325,18 @@ export async function runIgnition(
       await runSpend(ctx, householdSpend(loadWorld(ctx.worldPath)));
       commitWellbeing(ctx);
     }
+    if (tracker) observeSellouts(loadWorld(ctx.worldPath), tracker);
     commitRemainder(ctx);
     const settled = loadWorld(ctx.worldPath);
     lines.push(lineOf(settled));
-    saveWorld(ctx.worldPath, { ...settled, month: settled.month + 1 });
+    const advanced = settled.month + 1;
+    saveWorld(ctx.worldPath, { ...settled, month: advanced });
+    // The special month, in the interface's order: births first (ahead of any
+    // real-estate sale), then the dividend, then the entrepreneurs invest.
+    const special = advanced > 0 && advanced % 12 === 0;
+    if (special && opts.births) runSpecialBirths(ctx);
+    if (special && opts.dividend) commitDividends(ctx);
+    if (special && tracker) runInvestDay(ctx, tracker);
   }
   return lines;
 }

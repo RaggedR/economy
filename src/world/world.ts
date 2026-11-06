@@ -812,10 +812,10 @@ function bear(world: World, parentId: Id): { world: World; lines: FlowEntry[] } 
       [parentId]: { ...mother, children: [...mother.children, childId] },
     },
   };
-  next = payAcrossHolders(next, parentId, childId, params.cashGift);
+  next = payAcrossHolders(next, parentId, childId, params.birthEndowment);
   return {
     world: next,
-    lines: pair(next.month, "estate", parentId, childId, params.cashGift),
+    lines: pair(next.month, "estate", parentId, childId, params.birthEndowment),
   };
 }
 
