@@ -19,6 +19,8 @@ import type {
   Career,
   Disease,
   Firm,
+  FirmKind,
+  Good,
   Id,
   Listing,
   Machine,
@@ -26,6 +28,7 @@ import type {
   Money,
   Person,
   Qty,
+  ShelfGood,
   World,
 } from "./types.ts";
 import { CAREERS, isDisease } from "./types.ts";
@@ -299,4 +302,102 @@ export function awardSupply(
     throw new Error("award bundle is not a positive integer");
   }
   return Math.floor(units / bundle);
+}
+
+/** Loaves one supermarket bakes. A generation-0 retail machine wants two
+ *  operators and makes `outputAt0`. One worker staffs half of it, so a second
+ *  machine adds nothing until a second worker arrives. Town retail workers
+ *  have no assignment, so this counts the job. `crew` would drop them. */
+export function stapleOutput(world: World, firmId: Id): Qty {
+  const firm = world.firms[firmId];
+  if (!firm || firm.folded || firm.kind !== "supermarket") return 0;
+  const workers =
+    Object.values(world.people).filter((person) =>
+      person.alive && person.job?.firm === firmId && person.job.career === "retail"
+    ).length;
+  let left = workers;
+  let made = 0;
+  for (const machine of held(world, firm, "retail")) {
+    const need = ops("retail", machine.generation);
+    const take = Math.min(need, left);
+    if (take <= 0) break;
+    made += Math.floor(output("retail", machine.generation) * take / need);
+    left -= take;
+  }
+  return made;
+}
+
+/** Add this month's bake to staple inventory. Does not post the listing. */
+/** The good a producing firm makes. Public firms award health and education
+ *  through the doctor/teacher machines, not a shelf good, so they return null.
+ *  Cure and tuition are shelf-posted one-shot elsewhere; this is the continuous
+ *  shelf. */
+export function firmGood(kind: FirmKind): ShelfGood | null {
+  switch (kind) {
+    case "supermarket":
+      return "staple";
+    case "luxury":
+      return "luxuryFood";
+    case "nightclub":
+      return "nightclub";
+    default:
+      return null;
+  }
+}
+
+/** The career that staffs a producing firm's machine. */
+function productionCareer(kind: FirmKind): Career | null {
+  switch (kind) {
+    case "supermarket":
+    case "luxury":
+      return "retail";
+    case "nightclub":
+      return "hospitality";
+    default:
+      return null;
+  }
+}
+
+/** Units of its good a firm makes this month. The staple generalisation:
+ *  career-matched operators staff career-typed machines, and each fully-staffed
+ *  machine yields output(career, generation). Returns null for a firm with no
+ *  continuous good (banks, mills, public staff, hospitals, universities). */
+export function firmOutput(
+  world: World,
+  firmId: Id,
+): { good: ShelfGood; qty: Qty } | null {
+  const firm = world.firms[firmId];
+  if (!firm || firm.folded) return null;
+  const good = firmGood(firm.kind);
+  const career = productionCareer(firm.kind);
+  if (!good || !career) return null;
+  const workers =
+    Object.values(world.people).filter((person) =>
+      person.alive && person.job?.firm === firmId && person.job.career === career
+    ).length;
+  let left = workers;
+  let made = 0;
+  for (const machine of held(world, firm, career)) {
+    const need = ops(career, machine.generation);
+    const take = Math.min(need, left);
+    if (take <= 0) break;
+    made += Math.floor(output(career, machine.generation) * take / need);
+    left -= take;
+  }
+  return made > 0 ? { good, qty: made } : null;
+}
+
+export function bakeStaple(world: World): World {
+  let firms = world.firms;
+  for (const firmId of Object.keys(world.firms).sort()) {
+    const n = stapleOutput(world, firmId);
+    if (n <= 0) continue;
+    const firm = firms[firmId];
+    const have = firm.inventory.staple ?? 0;
+    firms = {
+      ...firms,
+      [firmId]: { ...firm, inventory: { ...firm.inventory, staple: have + n } },
+    };
+  }
+  return firms === world.firms ? world : { ...world, firms };
 }

@@ -52,7 +52,7 @@ export type MonthResult = {
   recon: ReconcileReport;
 };
 
-function commitOpening(ctx: HarnessCtx): void {
+export function commitOpening(ctx: HarnessCtx): void {
   const plan = planOpening(loadWorld(ctx.worldPath));
   for (const effect of plan.effects) {
     commitEngine(

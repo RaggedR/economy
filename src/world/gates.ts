@@ -9,11 +9,13 @@ import type {
   Disease,
   Effect,
   FlowRow,
+  Good,
   Id,
   MachineType,
   Money,
   Qty,
   Rate,
+  ShelfGood,
   World,
 } from "./types.ts";
 import {
@@ -82,21 +84,23 @@ export function drawGate(
   return ok({ tag: "draw", firm: firmId, owner, amount });
 }
 
-function listedStaple(world: World, firmId: Id): Qty {
+function listedGood(world: World, firmId: Id, good: Good): Qty {
   let n = 0;
   for (const listing of world.listings) {
     if (listing.seller !== firmId || listing.kind !== "good") continue;
-    if (goodOf(listing.payload) !== "staple") continue;
+    if (goodOf(listing.payload) !== good) continue;
     n += listing.qty;
   }
   return n;
 }
 
-/** Staple only. Other goods are later markets. The listing id is minted in
- *  applyEffect; the gate's id is empty. */
-export function postGoodGate(
+/** Post `qty` of any one good a firm already holds, at `price`. The staple
+ *  bake is the common case; a producing firm posts its luxury or nightclub the
+ *  same way. The gate refuses to list more than the firm has in that good. */
+export function postInventoryGate(
   world: World,
   firmId: Id,
+  good: ShelfGood,
   price: Money,
   qty: Qty,
 ): GateResult {
@@ -105,10 +109,12 @@ export function postGoodGate(
   const firm = world.firms[firmId];
   if (!firm) return refused(`no firm ${firmId}`);
   if (firm.folded) return refused(`${firmId} has folded`);
-  const stock = firm.inventory.staple ?? 0;
-  const already = listedStaple(world, firmId);
+  const stock = firm.inventory[good] ?? 0;
+  const already = listedGood(world, firmId, good);
   if (already + qty > stock) {
-    return refused(`qty ${qty} plus listed ${already} exceeds staple inventory ${stock}`);
+    return refused(
+      `qty ${qty} plus listed ${already} exceeds ${good} inventory ${stock}`,
+    );
   }
   return ok({
     tag: "post",
@@ -118,9 +124,19 @@ export function postGoodGate(
       kind: "good",
       price,
       qty,
-      payload: { good: "staple" },
+      payload: { good },
     },
   });
+}
+
+/** The staple post: the original surface, now a thin call on the general gate. */
+export function postGoodGate(
+  world: World,
+  firmId: Id,
+  price: Money,
+  qty: Qty,
+): GateResult {
+  return postInventoryGate(world, firmId, "staple", price, qty);
 }
 
 /** A zero qty is a legal order that bought nothing. It commits, and it does

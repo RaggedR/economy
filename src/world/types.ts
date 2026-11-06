@@ -224,8 +224,12 @@ export type HouseOffer = { house: Id };
  *  Tuition names a career. The other goods do not. */
 export type Good = "staple" | "luxuryFood" | "nightclub" | "tuition";
 
+/** The goods that post as a plain shelf lot, without the tuition career tag.
+ *  These are the ones a firm produces continuously. */
+export type ShelfGood = "staple" | "luxuryFood" | "nightclub";
+
 export type GoodOffer =
-  | { good: "staple" | "luxuryFood" | "nightclub" }
+  | { good: ShelfGood }
   | { good: "tuition"; career: Career };
 
 /** A private-hospital cure. Ten units of one disease. A cure is not a Good. */

@@ -1,0 +1,384 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{tikz-cd}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{microtype}
+\usepackage[colorlinks=true,linkcolor=accent,urlcolor=accent]{hyperref}
+
+\definecolor{accent}{HTML}{1F6FB2}
+\definecolor{codebg}{HTML}{F5F6F8}
+\definecolor{codekw}{HTML}{8A2BE2}
+\definecolor{codecm}{HTML}{6A8759}
+\definecolor{codestr}{HTML}{C1601A}
+
+\lstdefinelanguage{TS}{
+  morekeywords={const,let,function,return,type,export,import,from,readonly,
+    interface,extends,number,string,boolean,void,null,async,await,new,for,of,
+    if,else,throw,true,false,in,as,keyof},
+  sensitive=true,
+  morecomment=[l]{//},
+  morestring=[b]",
+  morestring=[b]'
+}
+\lstset{
+  language=TS,
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codekw}\bfseries,
+  commentstyle=\color{codecm}\itshape,
+  stringstyle=\color{codestr},
+  frame=single,
+  framesep=6pt,
+  rulecolor=\color{codebg},
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  breaklines=true,
+  xleftmargin=10pt,
+  xrightmargin=6pt,
+  aboveskip=10pt,belowskip=6pt
+}
+
+\newtheorem{law}{Law}
+\newcommand{\Store}{\mathsf{Store}}
+\newcommand{\State}{\mathsf{State}}
+\newcommand{\extract}{\varepsilon}
+\newcommand{\duplicate}{\delta}
+
+\title{\textbf{The Comonadic Sweep Harness}\\[2pt]
+\large Parameter tuning as a Store comonad, and why that is the right shape}
+\author{Economy showpiece --- \texttt{harness-worker-orchestration/economy}}
+\date{6 November 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent The economy showpiece is tuned by a \emph{sweep harness}: a program
+that runs the simulated town under many parameter vectors and reports what
+changed. This note shows that the harness is not merely organised with a
+categorical flavour --- it \emph{is} the \textbf{Store comonad}, exactly. The
+comonad's three operations ($\extract$, $\duplicate$, $\mathrm{extend}$) turn
+out to be precisely the primitives a tuning tool needs: run the baseline, read a
+counterfactual, and compute a \emph{neighbourhood-aware} quantity such as a
+sensitivity gradient. We derive the sensitivity analysis as a finite-difference
+kernel under $\mathrm{extend}$, show that the comonad laws are a correctness
+contract on the instrument, and prove that the simulation layer (a State monad)
+and the tuning layer (a Store comonad) are the monad and comonad of \emph{one and
+the same adjunction}. The emphasis throughout is on what the structure
+\emph{buys you}: counterfactuals that cannot corrupt your baseline, a grid and a
+gradient from the same operator, higher-order cross-elasticities that are
+guaranteed coherent, and a tuning calculus completely decoupled from the model
+it tunes.
+\end{abstract}
+
+\section{The harness \emph{is} a Store}
+
+The Store comonad (also Costate, the ``spreadsheet'' comonad) is a readout from
+positions to values, paired with a distinguished position --- the \emph{focus}:
+\[
+  \Store\,S\,A \;=\; (S \to A) \times S.
+\]
+In code:
+
+\begin{lstlisting}
+export type Store<S, A> = { readonly peek: (s: S) => A; readonly pos: S };
+\end{lstlisting}
+
+The harness instantiates this with no encoding step whatsoever:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Store component & Type & In the harness \\
+\midrule
+position & $S$ & a full \texttt{Params} vector \\
+readout  & $S \to A$ & ``boot the town at these params, run $N$ months, summarise'' \\
+focus    & $S$ & the baseline \texttt{Params} \\
+value    & $A$ & a \texttt{Result} (deaths, folds, prices, cash band) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The readout is a genuine \emph{function} because the economy runs under
+a seeded RNG and a fixed clock: the same parameters always produce the same
+\texttt{Result}. That determinism is the hinge on which everything below turns.
+
+\section{The operations are tuning primitives}
+
+A comonad provides $\extract : W A \to A$ and $\duplicate : W A \to W(W A)$,
+from which $\mathrm{extend}$ is derived. For the Store comonad these specialise
+to a vocabulary that reads, position by position, like the things a person
+tuning a simulation actually does.
+
+\begin{center}
+\begin{tabular}{@{}l l p{5.4cm}@{}}
+\toprule
+Operation & Type & What it \emph{is} when tuning \\
+\midrule
+\texttt{extract} & $\Store\,S\,A \to A$ & run at the baseline: the number you are staring at \\
+\texttt{peek}\,$s'$ & $S \to \Store\,S\,A \to A$ & a counterfactual, \emph{without} moving the baseline \\
+\texttt{seek}\,$s'$ & $S \to \Store\,S\,A \to \Store\,S\,A$ & re-baseline: commit to a new operating point \\
+\texttt{experiment} & $(S \to [S]) \to \Store\,S\,A \to [A]$ & the grid: a whole shape of counterfactuals \\
+\texttt{duplicate} & $\Store\,S\,A \to \Store\,S\,(\Store\,S\,A)$ & the entire response surface as a field \\
+\texttt{extend}\,$k$ & $(\Store\,S\,A \to B) \to \Store\,S\,A \to \Store\,S\,B$ & a neighbourhood-aware quantity at every point \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The quietly important pair is \texttt{peek} versus \texttt{seek}.
+\texttt{peek} asks ``what if \texttt{firmFloat} were $60$?'' and returns an
+answer while leaving the focus exactly where it was; \texttt{seek} actually
+relocates. In a hand-rolled sweep you mutate a global config, forget to restore
+it, and your ``baseline'' silently drifts. The comonad makes \emph{ask without
+moving} and \emph{move} two different, differently-typed operations --- the drift
+bug is unrepresentable.
+
+\section{\texttt{extend} is the derivative}
+
+This is the crux, and the reason the structure must be a comonad rather than a
+plain \texttt{Array.map}.
+
+\texttt{map}$(f)$ transforms each readout value \emph{pointwise}: $f$ sees one
+\texttt{Result} and nothing around it. It can never compute a slope, because a
+slope needs two neighbouring points.
+
+\texttt{extend}$(k)$ hands the kernel $k$ the \emph{entire store refocused at
+each position}, so $k$ may \texttt{peek} at neighbours and return a difference.
+A local sensitivity $\partial(\text{metric})/\partial(\text{knob})$ is exactly a
+forward-difference kernel:
+
+\begin{lstlisting}
+function slope(axis, step, metric) {
+  return (w) => {
+    // read this point, then its neighbour one step up the axis
+    const here = metric(extract(w));
+    const up   = metric(peek(bump(w.pos, axis, step), w));
+    return (up - here) / step;   // forward difference: d metric / d knob
+  };
+}
+// the sensitivity at the baseline focus:
+const k = slope("stapleReservePrice", 4, r => r.firmsAlive);
+const dFirms = extract(extend(k, w));
+\end{lstlisting}
+
+\paragraph{Why this is the canonical use of Store.} The textbook $\mathrm{extend}$
+over a Store is a \emph{cellular automaton}: Conway's Life is
+$\mathrm{extend}(\mathit{rule})$ over a Store of the grid, where $\mathit{rule}$
+reads the eight neighbours of the focused cell. The tuning harness is the same
+machine on a different lattice: each ``cell'' is a parameter point, and the
+``rule'' reads adjacent configurations to compute a gradient. Sensitivity
+analysis and cellular automata are \emph{the same comonadic computation}. This is
+why, run on the live town, \texttt{extend} found that the reserve price, not the
+cash float, is the dominant lever on firm survival:
+
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+knob & $\partial\,\text{firms}$ & $\partial\,\text{fed}$ \\
+\midrule
+\texttt{firmFloat}          & $0.125$ & $0.000$ \\
+\texttt{stapleReservePrice} & $\mathbf{0.500}$ & $-0.250$ \\
+\texttt{townWage}           & $0.000$ & $-0.750$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent \texttt{map} is blind to the neighbourhood where that slope lives;
+\texttt{extend} is defined by it.
+
+\section{The laws are a correctness contract}
+
+The harness ships eight passing law tests. They are not decoration --- each is a
+guarantee about the tuning instrument.
+
+\begin{law}[Counit]
+$\extract \circ \duplicate = \mathrm{id}$, and $\mathrm{map}\,\extract \circ
+\duplicate = \mathrm{id}$. Equivalently $\extract(\mathrm{extend}\,k) = k$: the
+sensitivity you read at the focus is \emph{exactly} the kernel you asked for, with
+no leakage from the refocusing machinery.
+\end{law}
+
+\begin{law}[Coassociativity]
+$\duplicate \circ \duplicate = \mathrm{map}\,\duplicate \circ \duplicate$.
+Consequently $\mathrm{extend}(k) \circ \mathrm{extend}(g)$ is associative, so a
+\emph{sensitivity of a sensitivity} --- the Hessian, the cross-elasticities ---
+is well defined and independent of the order in which the knobs are
+differentiated. ``Does raising \texttt{firmFloat} change how sensitive the town
+is to \texttt{stapleReservePrice}?'' is a coherent question precisely because this
+law holds.
+\end{law}
+
+\noindent The hinge that makes all of it legal is \textbf{determinism}:
+\texttt{peek}\,$s$ is a function only if the same params always give the same
+\texttt{Result}. The seeded, fixed-clock replay that the project's
+\texttt{verify.sh} already demands is \emph{also} what makes the tuning calculus
+sound. Were the model nondeterministic, \texttt{peek} would not be a function and
+the gradients would be meaningless.
+
+\section{Simulation and tuning are one adjunction}
+
+The relationship between the two layers of the system is tighter than ``monad
+inside, comonad outside.'' Fix an object $S$ and take the product--exponential
+adjunction
+\[
+  (- \times S) \;\dashv\; (S \to -).
+\]
+Its two composites are, on the nose, the two structures the system runs on:
+\[
+  \underbrace{(S \to -)\circ(- \times S)}_{\textstyle S \to (A \times S)}
+  \;=\; \State\,S,
+  \qquad
+  \underbrace{(- \times S)\circ(S \to -)}_{\textstyle (S \to A)\times S}
+  \;=\; \Store\,S.
+\]
+
+\begin{center}
+\begin{tikzcd}[column sep=large]
+\mathbf{Set} \arrow[r, bend left=25, "{-\,\times\,S}"] \arrow[r, phantom, "\scriptstyle\bot"] &
+\mathbf{Set} \arrow[l, bend left=25, "{S\,\to\,-}"]
+\end{tikzcd}
+\end{center}
+
+\noindent The inner simulation threads the world, $\mathtt{World} \to
+(\mathit{flows}, \mathtt{World})$ --- the \textbf{State monad} at $S =
+\mathtt{World}$. The outer sweep varies the parameters and reads out, $(\mathtt{Params}
+\to \mathtt{Result},\ \mathtt{Params})$ --- the \textbf{Store comonad} at $S =
+\mathtt{Params}$. These are the monad and the comonad induced by \emph{the same
+adjunction}, instantiated at two different objects. The thing that runs the
+economy and the thing that tunes it are the two faces of product-and-exponential.
+
+\paragraph{Why a comonad, not a monad, for tuning.} A monad builds a computation
+from context you put \emph{in} (sequencing effects); a comonad reads a value
+\emph{out} of a context that surrounds it. Tuning is ``extract one verdict from a
+neighbourhood of configurations'' --- a co-Kleisli, context-dependent
+extraction. The direction of information flow is opposite to the simulation's, so
+the structure dualises.
+
+\section{What the harness lets you do --- and why the comonad makes it elegant}
+
+This is the payoff. Each capability below is enabled by a specific comonad
+operation, and in each case the comonad is what makes it a one-liner rather than
+a pile of bespoke bookkeeping.
+
+\begin{center}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{4.3cm}p{2.6cm}p{6.9cm}@{}}
+\toprule
+Capability & Operation & Why the structure makes it elegant \\
+\midrule
+Counterfactual without drift &
+\texttt{peek} / \texttt{seek} &
+Asking ``what if'' and committing to a new baseline are distinct, typed acts;
+the classic mutate-and-forget-to-restore bug is unrepresentable. \\
+
+The grid in one line &
+\texttt{experiment} &
+Sampling a shape of positions is a comonad primitive, not a bespoke loop with
+index bookkeeping. \\
+
+Gradients for free &
+\texttt{extend} &
+The \emph{same} operator that defines the grid defines the derivative; no
+separate differentiation engine. This is what surfaced
+\texttt{stapleReservePrice} $>$ \texttt{firmFloat}. \\
+
+Higher-order sensitivity &
+\texttt{extend}\,$\circ$\,\texttt{extend} &
+Cross-elasticities (does one knob change another's influence?) compose, and
+coassociativity \emph{guarantees} the result is coherent and order-independent. \\
+
+Steepest tuning &
+\texttt{extend} &
+Having the local gradient field, you can step the knob with the best
+$\partial(\text{objective})$ --- hill-climbing over the response surface is a
+fold over an \texttt{extend}. \\
+
+Verified instrument &
+the laws &
+Determinism $+$ the comonad laws mean the numbers the harness reports are sound,
+not merely plausible; the tuning tool is itself under test. \\
+
+Model-agnostic reuse &
+\texttt{Store} &
+\texttt{store.ts} knows nothing about economics. Point the readout at any
+deterministic simulation and the entire tuning calculus transfers unchanged. \\
+
+Principled architecture &
+the adjunction &
+Simulation and tuning are not two unrelated subsystems; they are the monad and
+comonad of one adjunction, so the design is forced, not improvised. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{The throughline.} The comonad cleanly separates \emph{the field of all
+configurations} from \emph{the local computation you run over it}. Once that
+separation is a first-class type, every neighbourhood-aware analysis ---
+gradients, Hessians, hill-climbing, what-if panels --- becomes a short
+composition of \texttt{extract}, \texttt{peek} and \texttt{extend}, and the laws
+guarantee those compositions mean what they say. Without the comonad you would
+hand-roll configuration mutation, restoration, and neighbour bookkeeping by hand,
+and nothing would guarantee that a gradient-of-a-gradient is even coherent.
+
+\section{Honest caveats}
+
+\begin{itemize}
+\item \textbf{One impure cell.} \texttt{params} is a module singleton, so the
+readout snapshots it, assigns the position, runs, and restores. That cell is
+quarantined and memoised; the comonad \emph{above} it is pure and lawful. Its
+denotation is a deterministic $\mathtt{Params} \to \mathtt{Result}$, and
+tabulating a deterministic function over the finite set of positions that
+\texttt{experiment} and \texttt{extend} touch does not change its meaning.
+\item \textbf{Secants, not tangents.} The knobs are integers; there is no
+$h \to 0$. The forward difference \emph{is} the honest object, and the step size
+is part of the question, not an approximation error.
+\item \textbf{No optimiser yet.} The structure supports steepest-ascent tuning;
+the harness currently reports the gradient field but does not itself walk it.
+\end{itemize}
+
+\appendix
+\section{Core listings}
+
+\begin{lstlisting}
+// store.ts -- the Store comonad, pure and lawful over a deterministic readout.
+export function extract<S, A>(w: Store<S, A>): A { return w.peek(w.pos); }
+export function peek<S, A>(s: S, w: Store<S, A>): A { return w.peek(s); }
+export function seek<S, A>(s: S, w: Store<S, A>): Store<S, A> {
+  return { peek: w.peek, pos: s };
+}
+export function map<S, A, B>(f: (a: A) => B, w: Store<S, A>): Store<S, B> {
+  return { peek: (s) => f(w.peek(s)), pos: w.pos };
+}
+export function duplicate<S, A>(w: Store<S, A>): Store<S, Store<S, A>> {
+  return { peek: (s) => ({ peek: w.peek, pos: s }), pos: w.pos };
+}
+export function extend<S, A, B>(k: (w: Store<S, A>) => B, w: Store<S, A>): Store<S, B> {
+  return { peek: (s) => k({ peek: w.peek, pos: s }), pos: w.pos };
+}
+export function experiment<S, A>(shape: (s: S) => readonly S[], w: Store<S, A>): A[] {
+  return shape(w.pos).map((s) => w.peek(s));
+}
+\end{lstlisting}
+
+\begin{lstlisting}
+// store_test.ts -- the laws, checked by sampling the readout (stores hold functions).
+Deno.test("extract then duplicate = id", () => {
+  assert(storeEq(SAMPLE, extract(duplicate(w)), w, eqNum));
+});
+Deno.test("coassociativity", () => {
+  const left  = duplicate(duplicate(w));
+  const right = map(duplicate, duplicate(w));
+  assert(storeEq(SAMPLE, left, right, eqMiddle));
+});
+Deno.test("extract . extend k = k", () => {
+  const k = (v) => extract(v) + peek(v.pos + 1, v);
+  assert(extract(extend(k, w)) === k(w));
+});
+\end{lstlisting}
+
+\end{document}

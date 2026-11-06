@@ -67,6 +67,53 @@ export function nextOrePrice(world: World, bank: BankId, material: Material): Mo
   return stepToward(current, other, stressed(world, bank));
 }
 
+function scale(price: Money, ratio: { num: number; den: number }): Money {
+  if (
+    !Number.isInteger(ratio.num) || !Number.isInteger(ratio.den) ||
+    ratio.num < 1 || ratio.den < 1
+  ) {
+    throw new Error("reprice factor is not a positive integer ratio");
+  }
+  const next = Math.floor(price * ratio.num / ratio.den);
+  // A post at 0 is refused, so the next price stays at 1.
+  return next < 1 ? 1 : next;
+}
+
+function staplePosts(world: World, firmId: Id): Listing[] {
+  return world.listings.filter((listing) =>
+    listing.seller === firmId && listing.kind === "good" &&
+    goodOf(listing.payload) === "staple"
+  );
+}
+
+/** Next staple post, from the latest listing. None yet keeps the t₀ price.
+ *  Nothing left on it sold out, so the price multiplies by `raiseFactor`.
+ *  Bread left on it went unsold, so the price multiplies by `cutFactor`.
+ *  The listing does not remember its original qty, so any remainder is the
+ *  cut. A competitor's latest post, when lower, caps the result at that
+ *  post times `undercutFactor`. */
+export function nextStaplePrice(world: World, firmId: Id): Money {
+  const mine = staplePosts(world, firmId);
+  const last = mine[mine.length - 1];
+  if (!last) return params.stapleReservePrice;
+  const ratio = last.qty > 0 ? params.cutFactor : params.raiseFactor;
+  let price = scale(last.price, ratio);
+  let cap = price;
+  let bound = false;
+  for (const other of Object.keys(world.firms).sort()) {
+    if (other === firmId) continue;
+    const posts = staplePosts(world, other);
+    const posted = posts[posts.length - 1];
+    if (!posted || posted.price >= price) continue;
+    const there = scale(posted.price, params.undercutFactor);
+    if (!bound || there < cap) {
+      cap = there;
+      bound = true;
+    }
+  }
+  return bound && cap < price ? cap : price;
+}
+
 export type LoanAsk = {
   bank: BankId;
   borrower: Id;
@@ -122,6 +169,7 @@ export function loanAsk(world: World, borrower: Id, bank: BankId): LoanAsk | nul
 // toward the archive career with the most slots.
 
 const RESERVE_ROWS: readonly FlowRow[] = [
+  "wages",
   "maintenance",
   "tax",
   "bankInterest",
@@ -229,15 +277,32 @@ export function trainingBids(world: World): TrainingBid[] {
   return bids;
 }
 
-/** Outflow on maintenance, tax, and debt service. The builder's inflow is not a reserve. */
+/** This month's wage, maintenance, tax, and debt service. Older lines are a
+ *  bill already met. The builder's inflow is not a reserve. */
+/** Wages owed this month by one firm. Inlined from purses.wageBill to avoid an
+ *  import cycle: purses already reads drawAmount from here. */
+function wageBillSum(world: World, firmId: Id): Money {
+  let sum = 0;
+  for (const person of Object.values(world.people)) {
+    if (!person.alive || !person.job) continue;
+    if (person.job.firm !== firmId || person.job.salary <= 0) continue;
+    sum += person.job.salary;
+  }
+  return sum;
+}
+
 export function operatingReserve(world: World, firmId: Id): Money {
   let reserve = 0;
   for (const line of world.flows) {
+    if (line.month !== world.month) continue;
     if (line.holder !== firmId || line.amount >= 0) continue;
     if (!RESERVE_ROWS.includes(line.row as FlowRow)) continue;
     reserve -= line.amount;
   }
-  return reserve;
+  // Working capital: a year of payroll, so the draw leaves the firm a buffer
+  // instead of sweeping it hand-to-mouth. The month's own bill is still a floor.
+  const working = params.firmReserveMonths * wageBillSum(world, firmId);
+  return Math.max(reserve, working);
 }
 
 /** Cash left after the reserve. Folded, missing, and fully reserved firms draw nothing. */

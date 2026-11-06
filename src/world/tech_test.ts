@@ -1,10 +1,11 @@
 // tech_test.ts — the plan does not mint a generation. ops falls. output does
-// not. Public supply is the machines, not the headcount.
+// not. Public supply is the machines, not the headcount. One shop worker
+// bakes half of one oven.
 
 import { assertEquals } from "jsr:@std/assert@1";
 import { deliverMachineGate, strategyGate } from "./gates.ts";
-import { healthSeed, techSeed } from "./seed.ts";
-import { awardSupply, currentLine, ops, output } from "./tech.ts";
+import { healthSeed, techSeed, townSeed } from "./seed.ts";
+import { awardSupply, currentLine, ops, output, stapleOutput } from "./tech.ts";
 import type { Career, Effect, Listing, World } from "./types.ts";
 import { CAREERS } from "./types.ts";
 import { applyEffect, assertInvariant } from "./world.ts";
@@ -20,6 +21,33 @@ function generationOf(world: World, listingId: string): number | null {
   if (!payload || !("generation" in payload)) return null;
   return payload.generation;
 }
+
+Deno.test("one retail worker bakes half a generation-0 machine", () => {
+  const world = townSeed();
+  const half = Math.floor(output("retail", 0) / ops("retail", 0));
+  assertEquals(stapleOutput(world, "shop-1"), half);
+  assertEquals(stapleOutput(world, "shop-2"), half);
+  const firm = world.firms["shop-1"];
+  const id = "m-shop-1-b";
+  const withTwo = {
+    ...world,
+    machines: {
+      ...world.machines,
+      [id]: {
+        id,
+        type: "retail" as const,
+        generation: 0,
+        owner: "shop-1",
+        builder: "tech-1",
+      },
+    },
+    firms: {
+      ...world.firms,
+      "shop-1": { ...firm, machines: [...firm.machines, id] },
+    },
+  };
+  assertEquals(stapleOutput(withTwo, "shop-1"), half);
+});
 
 Deno.test("ops falls in g and output does not", () => {
   for (const career of CAREERS) {

@@ -8,7 +8,9 @@ import { firmShell, placeFirm, purseSeed, storySeed } from "./seed.ts";
 import type { Effect, World } from "./types.ts";
 import { applyEffect, assertFlowIdentity, assertInvariant, openingNfa } from "./world.ts";
 
-function held(gate: { ok: true; effect: Effect } | { ok: false; reason: string }): Effect {
+function held(
+  gate: { ok: true; effect: Effect } | { ok: false; reason: string },
+): Effect {
   if (!gate.ok) throw new Error(gate.reason);
   return gate.effect;
 }
@@ -17,7 +19,7 @@ function applyAll(world: World, effects: Effect[]): World {
   return effects.reduce((w, effect) => applyEffect(w, effect), world);
 }
 
-Deno.test("a draw moves the firm purse to its owner and leaves interbank", () => {
+Deno.test("a firm below its working-capital reserve keeps its purse", () => {
   const start = purseSeed();
   const base = openingNfa(start);
   const dl = start.banks.a.depositLiability + start.banks.b.depositLiability;
@@ -27,9 +29,13 @@ Deno.test("a draw moves the firm purse to its owner and leaves interbank", () =>
   assertEquals(world.people.ben.deposits.a, 100);
   assertEquals(world.people.ben.deposits.b, 800);
 
+  // A year of the shop worker's wage is 1200; the till holds 300, so the draw
+  // takes nothing and the working capital stays in the firm. The interbank
+  // position is untouched because no deposit moved. (A draw that does move a
+  // purse is covered by the next test.)
   world = applyAll(world, remainderDraws(world));
-  assertEquals(world.firms.shop.deposits, { a: 0, b: 0 });
-  assertEquals(world.people.ada.deposits.a, 1300);
+  assertEquals(world.firms.shop.deposits, { a: 300, b: 0 });
+  assertEquals(world.people.ada.deposits.a, 1000);
   assertEquals(world.interbank, 0);
   assertEquals(world.banks.a.depositLiability + world.banks.b.depositLiability, dl);
   assertInvariant(world);
@@ -56,7 +62,9 @@ Deno.test("the household cannot buy food with the firm's cash", () => {
   if (gated.ok) return;
   assertEquals(gated.reason.includes("cleo"), true);
   assertEquals(world.firms.shop.deposits.a, 400);
-  assertThrows(() => applyEffect(world, { tag: "draw", firm: "shop", owner: "ada", amount: 401 }));
+  assertThrows(() =>
+    applyEffect(world, { tag: "draw", firm: "shop", owner: "ada", amount: 401 })
+  );
 });
 
 Deno.test("an insolvent firm is not drawn and does not pay a partial wage", () => {
