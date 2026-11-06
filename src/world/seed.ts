@@ -1,5 +1,7 @@
 // seed.ts — the smallest worlds the milestones drive. Domain ids are fields of
-// the world. Log ids are not.
+// the world. Log ids are not. These seeds (townSeed, livingTownSeed, and the
+// scene seeds) are frozen; the additive 5× town lives in metropolis.ts and
+// reuses the `shell`/`makePerson`/`firmShell`/`placeFirm` builders exported here.
 
 import type {
   Bank,
@@ -57,7 +59,7 @@ function bank(id: "a" | "b", deposits: number, rate: number): Bank {
   };
 }
 
-function shell(
+export function shell(
   people: Record<string, Person>,
   depositsA: number,
   depositsB: number,

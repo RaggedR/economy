@@ -3,6 +3,7 @@
     "econ": "deno run --allow-read --allow-write src/cli/econ.ts",
     "demo": "deno run --allow-read --allow-write --allow-env --allow-net src/demo.ts",
     "ignite": "deno run --allow-read --allow-write src/ignite.ts",
+    "metropolis": "deno run --allow-read --allow-write src/metropolis.ts",
     "dashboard": "deno run --allow-read --allow-write src/dashboard/render.ts",
     "live": "deno run --allow-read --allow-write --allow-env --allow-net src/demo.ts --live",
     "test": "deno test --allow-read --allow-write",
