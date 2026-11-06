@@ -58,9 +58,22 @@ the dominant, **non-rival** lever: raising the wage lifts health, education,
 savings, thriving and the fed count together, because prices — and so firm
 revenue — stay put. Cheapening a good is **rival**: it helps that good's buyers
 but strips the producer, folding firms and lowering `fed`. `wage 16` is the best
-all-round point in the grid. It was **not** applied: it re-pins the milestone
-town for a welfare reason, and that is a deliberate baseline choice, not a knob
-the sweep should bake in.
+all-round point in the grid, and it was then **applied** as the town's baseline
+(`townWage 16`, `firmFloat 192`).
+
+## Follow-up — wellbeing responds to prosperity
+
+Happiness was pinned near one regardless of wealth: the spend policy bought one
+lot a month and decay cancelled it. Two changes fixed that, with two refinements
+they needed. `householdSpend` now spends down the chain until it cannot afford
+more (food is bought first, so draining the rest is safe), buying each good in
+one order of as many units as cash and stock allow. `commitWellbeing` decays a
+**fraction** (`wellbeingDecay = 1/5`) rather than a flat one, so a sustained
+consumption `c` settles near `5c` — a bounded ceiling income raises, not the
+unbounded ratchet a flat decay produced. Sold-out discretionary listings are
+pruned each month, so a long run does not accumulate a dead book (~12s → ~4s).
+Over 36 months happiness-objective people reach about 15 and `∂happy/∂townWage`
+is positive, where it was zero.
 
 ## Rulings
 
@@ -68,21 +81,16 @@ the sweep should bake in.
   economy is additive, behind `{ spend }` and `livingTownSeed`.
 - Working capital is a reserve floor on the draw, not just a bigger float: the
   draw is what swept the float out before.
-- Wellbeing decays before it accrues, so the steady state is the consumption
-  rate, not zero.
+- Wellbeing decays by a fraction before it accrues, so the steady state is a
+  bounded multiple of the consumption rate, not zero and not unbounded.
 - Indigenous machines (builder not a firm) carry no maintenance and move no
   money; that is how `livingTownSeed` adds them without touching the banks.
-- Happiness and health are flows (decay equilibria); education and savings are
-  stocks (ratchets). Each hits the same ceiling: affordability.
+- Happiness and health are flows (bounded decay equilibria); education and
+  savings are stocks (ratchets). Each hits the same ceiling: affordability,
+  which `wage 16` was chosen to raise.
 
 ## Next
 
-- **The happiness ceiling is a policy change, not a knob.** Households buy at
-  most one lot per objective per month, so happiness is pinned near its
-  consumption rate no matter how prices or wages move. Lifting that one-lot cap
-  (spend to a target, or buy a budget) is the only lever the sweep cannot reach.
-- **Apply `wage 16`?** Robin's call. It is a param change plus the milestone
-  re-pin it implies.
 - **Still built but not driven in the loop:** the special day (houses, jobs,
   share dividends, mine trades), the tech orders (hire, upgrade, new machine),
   and price discovery. Each would make the next objective-ceiling move.
